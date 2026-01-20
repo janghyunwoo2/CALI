@@ -8,13 +8,26 @@
 - ⚙️ **VS Code 환경**: 확장 및 설정 완료
 - 📚 **문서화**: README, 구조 설명, 계획서, 체크리스트
 - ✅ **Fluent Bit 설정**: Multiline 파서 + 헤더 파싱 완료
-- ✅ **더미 로그 생성기**: MVP 테스트용 샘플 로그 생성 도구 완성
-  - Faker 라이브러리로 현실적인 데이터 생성 (사용자명, IP, 트랜잭션 ID 등)
+  - **Fan-out 아키텍처 적용** (2026-01-20 변경)
+    - Fluent Bit → Kinesis Stream만 전송 (단일 진입점)
+    - Kinesis Stream → Consumer & Firehose로 자동 분배
+    - 네트워크 효율 50% 향상 (이전: 2번 전송 → 현재: 1번 전송)
+- ✅ **더미 로그 생성기**: MVP 테스트용 프로덕션급 로그 시뮬레이터 완성
+  - 7개 마이크로서비스 시뮬레이션
+  - 8종 실제 에러 시나리오 (DB, Payment, Cache 등)
+  - Java/Python 스택 트레이스 (15-30줄)
+  - **Faker 라이브러리 도입** (2026-01-20)
+    - 현실적인 데이터: 사용자명, IP, 주문번호, 트랜잭션 ID
+    - INFO 로그에서 주로 사용
+    - ERROR 로그는 하드코딩 + random 조합
+- ✅ **Consumer ERROR/WARN 필터링** (2026-01-20 추가)
+  - 모든 로그 수신하지만 ERROR/WARN만 처리
+  - INFO 로그는 자동 스킵
 
 ### ❌ 아직 안 된 것
-- ⚠️ **Terraform 코드**: TODO만 있고 실제 리소스 정의 없음
-- ⚠️ **Python Consumer**: 골격만 있고 실제 로직 없음
-- ⚠️ **AWS 인프라**: 배포 안 됨
+- ⚠️ **Terraform 코드**: Fan-out 설계 완료, 실제 리소스 구현 대기 (TODO)
+- ⚠️ **Python Consumer**: ERROR 필터링 완료, Kinesis 폴링 로직 구현 필요
+- ⚠️ **AWS 인프라**: 배포 안 됨 (LocalStack으로 로컬 테스트 예정)
 - ⚠️ **테스트**: 작성되지 않음
 
 ---
@@ -63,16 +76,19 @@ aws s3 ls
 **목표**: Kinesis 구독 → 로그 검증 → Slack 알림
 
 #### 체크리스트:
-- [ ] `kinesis_consumer.py` 실제 구현
-  - Kinesis GetRecords 폴링
-  - Pydantic 검증
-  - DLQ 처리 (S3)
+- [/] `kinesis_consumer.py` 실제 구현
+  - [ ] Kinesis GetRecords 폴링
+  - [x] Pydantic 검증 (골격 완료)
+  - [x] **ERROR/WARN 필터링** (2026-01-20 완료)
+    - 모든 로그 수신 → ERROR/WARN만 처리
+    - INFO 로그 자동 스킵
+  - [ ] DLQ 처리 (S3)
 - [ ] `slack_notifier.py` 실제 구현
-  - Webhook 전송
-  - Throttling 적용
-- [ ] **간단한 룰 기반 분석** (RAG 대신)
-  - ERROR 레벨이면 알림
-  - 특정 키워드 매칭
+  - [ ] Webhook 전송
+  - [ ] Throttling 적용
+- [x] **간단한 룰 기반 분석** (RAG 대신) - 기본 완료
+  - ERROR/WARN 레벨 필터링 완료
+  - [ ] 특정 키워드 매칭 (선택사항)
 
 #### 검증:
 ```bash
