@@ -1,0 +1,19 @@
+# =====================================================
+# Airflow 의존성 패키지
+# =====================================================
+
+# Airflow Providers
+apache-airflow-providers-amazon==8.31.0
+apache-airflow-providers-cncf-kubernetes==8.5.1
+
+# Great Expectations
+great-expectations==1.2.7
+
+# 데이터 처리
+pandas==2.2.3
+pyarrow==18.1.0
+
+# AWS SDK
+boto3==1.35.94
+
+# TODO: 추가 패키지 필요 시 업데이트

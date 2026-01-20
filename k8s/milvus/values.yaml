@@ -1,0 +1,36 @@
+# =====================================================
+# Milvus Helm Values
+# =====================================================
+# 설명: Milvus Vector DB Helm Chart 설치 시 사용할 Values
+# 용도: RAG용 벡터 검색 데이터베이스
+# =====================================================
+
+# 설치 명령:
+# helm repo add milvus https://zilliztech.github.io/milvus-helm/
+# helm install milvus milvus/milvus -f values.yaml -n cali-system
+
+# 배포 모드 (standalone 또는 cluster)
+cluster:
+  enabled: false  # Standalone 모드 (개발용)
+
+# 스토리지 설정
+persistence:
+  enabled: true
+  storageClass: gp3  # AWS EBS GP3
+  size: 20Gi
+
+# 리소스 제한
+resources:
+  limits:
+    memory: 2Gi
+    cpu: 1000m
+  requests:
+    memory: 1Gi
+    cpu: 500m
+
+# 서비스 타입
+service:
+  type: ClusterIP
+  port: 19530
+
+# TODO: 프로덕션 환경에서는 Cluster 모드로 변경

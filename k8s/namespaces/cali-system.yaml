@@ -1,0 +1,13 @@
+# =====================================================
+# CALI 전용 Namespace
+# =====================================================
+# 설명: CALI 프로젝트의 모든 리소스를 격리
+# =====================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cali-system
+  labels:
+    name: cali-system
+    project: cali

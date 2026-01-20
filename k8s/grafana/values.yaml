@@ -1,0 +1,52 @@
+# =====================================================
+# Grafana Helm Values
+# =====================================================
+# 설명: Grafana Helm Chart 설치 시 사용할 Values
+# 용도: OpenSearch 데이터 소스 연결 및 대시보드 설정
+# =====================================================
+
+# 설치 명령:
+# helm repo add grafana https://grafana.github.io/helm-charts
+# helm install grafana grafana/grafana -f values.yaml -n cali-system
+
+# 기본 설정
+replicas: 1
+service:
+  type: LoadBalancer  # 또는 ClusterIP + Ingress 사용
+  port: 3000
+
+# Admin 자격증명
+adminUser: admin
+adminPassword: "ChangeMe123!"  # TODO: 보안 강화
+
+# 데이터 소스 (OpenSearch)
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+    - name: OpenSearch
+      type: grafana-opensearch-datasource
+      access: proxy
+      url: https://<OPENSEARCH_ENDPOINT>  # TODO: Terraform 출력값으로 변경
+      jsonData:
+        timeField: "@timestamp"
+        database: "cali-logs*"  # 인덱스 패턴
+        # TODO: 인증 설정 (Basic Auth 또는 AWS Signature)
+      secureJsonData:
+        # TODO: OpenSearch 자격증명 추가
+
+# 대시보드 프로비저닝
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      updateIntervalSeconds: 10
+      options:
+        path: /var/lib/grafana/dashboards/default
+
+# TODO: 추가 커스터마이징 필요

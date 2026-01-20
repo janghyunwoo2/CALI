@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY dummy-log-generator.py .
+
+# 로그 생성기 실행
+CMD ["python", "dummy-log-generator.py", "--interval", "2", "--error-rate", "0.3"]
