@@ -18,6 +18,10 @@
   - [x] 8종 실제 에러 시나리오
   - [x] Java/Python 스택 트레이스 (15-30줄)
   - [x] 상세 메타데이터 (Pod, 버전, Request ID)
+  - [x] **Faker 라이브러리 도입** (현실적인 데이터 생성)
+    - [x] 사용자명, 이메일, IP 주소
+    - [x] 주문번호, 트랜잭션 ID, SKU
+    - [x] 정확한 Decimal 금액
 
 ### 진행 중 🚧
 - [ ] Kinesis Consumer 핵심 로직 구현

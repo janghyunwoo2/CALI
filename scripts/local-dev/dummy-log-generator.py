@@ -18,11 +18,16 @@ import time
 from datetime import datetime
 from typing import Dict, List
 
+from faker import Faker
+
 
 class ProductionLogSimulator:
     """실제 운영 환경의 로그를 시뮬레이션하는 클래스"""
 
     def __init__(self):
+        # Faker 인스턴스 생성
+        self.fake = Faker()
+
         # 실제 마이크로서비스 아키텍처 시뮬레이션
         self.services = {
             "payment-api": {
@@ -167,37 +172,32 @@ class ProductionLogSimulator:
         # 템플릿에 맞는 데이터 생성
         if "ORDER-" in template:
             msg = template.format(
-                random.randint(100000, 999999), random.uniform(10, 500)
+                self.fake.ean(length=8),
+                self.fake.pydecimal(left_digits=3, right_digits=2, positive=True),
             )
         elif "user-" in template and "IP" in template:
-            msg = template.format(
-                random.randint(1000, 9999),
-                random.randint(10, 255),
-                random.randint(10, 255),
-                random.randint(10, 255),
-                random.randint(10, 255),
-            )
+            msg = template.format(self.fake.user_name(), *self.fake.ipv4().split("."))
         elif "TXN-" in template:
             msg = template.format(
-                f"20260119-{random.randint(100000, 999999)}",
+                self.fake.uuid4()[:13],
                 random.choice(["Stripe", "PayPal", "Square"]),
-                random.uniform(10, 1000),
+                self.fake.pydecimal(left_digits=3, right_digits=2, positive=True),
             )
         elif "Cache hit" in template:
             msg = template.format(random.uniform(85, 99), random.randint(5, 50))
         elif "SKU-" in template:
             old_stock = random.randint(10, 100)
             msg = template.format(
-                random.randint(1000, 9999), old_stock, old_stock - random.randint(1, 5)
+                self.fake.ean(length=8), old_stock, old_stock - random.randint(1, 5)
             )
         elif "Email" in template:
             msg = template.format(
                 random.choice(["order_confirmation", "password_reset", "welcome"]),
-                random.randint(1000, 9999),
+                self.fake.user_name(),
                 random.randint(50, 500),
             )
         elif "GET /api" in template:
-            msg = template.format(random.randint(1000, 9999), random.randint(10, 200))
+            msg = template.format(self.fake.uuid4()[:8], random.randint(10, 200))
         else:
             msg = template.format(random.randint(10, 1000), random.randint(5, 100))
 
