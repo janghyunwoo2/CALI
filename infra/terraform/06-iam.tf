@@ -128,8 +128,8 @@ resource "aws_iam_policy" "firehose_s3" {
           "s3:ListBucket"
         ]
         Resource = [
-          "arn:aws:s3:::${var.project_name}-logs",
-          "arn:aws:s3:::${var.project_name}-logs/*"
+          aws_s3_bucket.logs.arn,
+          "${aws_s3_bucket.logs.arn}/*"
         ]
       },
       {
@@ -183,42 +183,43 @@ resource "aws_iam_role_policy_attachment" "firehose_opensearch" {
 }
 
 # ------------------------------------------------------------------------------
-# Grafana Role (AMG용)
+# Grafana Role (AMG용) - Helm Grafana 사용으로 주석 처리
 # ------------------------------------------------------------------------------
-resource "aws_iam_role" "grafana" {
-  name = "${var.project_name}-grafana-role"
+# resource "aws_iam_role" "grafana" {
+#   name = "${var.project_name}-grafana-role"
+#
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [{
+#       Action = "sts:AssumeRole"
+#       Effect = "Allow"
+#       Principal = {
+#         Service = "grafana.amazonaws.com"
+#       }
+#     }]
+#   })
+# }
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "grafana.amazonaws.com"
-      }
-    }]
-  })
-}
+# resource "aws_iam_policy" "grafana_opensearch" {
+#   name        = "${var.project_name}-grafana-opensearch"
+#   description = "Grafana OpenSearch 읽기 권한"
+#
+#   policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [{
+#       Effect = "Allow"
+#       Action = [
+#         "es:ESHttpGet",
+#         "es:ESHttpPost",
+#         "es:DescribeElasticsearchDomain"
+#       ]
+#       Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-*"
+#     }]
+#   })
+# }
 
-resource "aws_iam_policy" "grafana_opensearch" {
-  name        = "${var.project_name}-grafana-opensearch"
-  description = "Grafana OpenSearch 읽기 권한"
+# resource "aws_iam_role_policy_attachment" "grafana_opensearch" {
+#   policy_arn = aws_iam_policy.grafana_opensearch.arn
+#   role       = aws_iam_role.grafana.name
+# }
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "es:ESHttpGet",
-        "es:ESHttpPost",
-        "es:DescribeElasticsearchDomain"
-      ]
-      Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-*"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "grafana_opensearch" {
-  policy_arn = aws_iam_policy.grafana_opensearch.arn
-  role       = aws_iam_role.grafana.name
-}

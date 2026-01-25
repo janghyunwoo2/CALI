@@ -7,8 +7,10 @@
 # ------------------------------------------------------------------------------
 # S3 Bucket
 # ------------------------------------------------------------------------------
+# data "aws_caller_identity" "current" {} # 이미 06-iam.tf에 정의됨
+
 resource "aws_s3_bucket" "logs" {
-  bucket = "${var.project_name}-logs"
+  bucket = "${var.project_name}-logs-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Name = "${var.project_name}-logs"

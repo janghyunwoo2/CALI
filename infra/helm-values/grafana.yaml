@@ -1,0 +1,69 @@
+# ==============================================================================
+# CALI Infrastructure - Grafana Helm Values
+# ==============================================================================
+# EKS에 Helm으로 Grafana 배포 시 사용
+# 배포 명령어: helm install grafana grafana/grafana -f helm-values/grafana.yaml
+# ==============================================================================
+
+# 관리자 계정
+adminUser: admin
+adminPassword: "ChangeMe123!"  # 실제 배포 시 변경 필요
+
+# 리소스 제한
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# 영구 저장소
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: gp2
+
+# 서비스 타입 (LoadBalancer로 외부 접속 허용)
+service:
+  type: LoadBalancer
+  port: 80
+
+# 데이터 소스 설정
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      # OpenSearch 연결 (Terraform 배포 후 endpoint 입력)
+      - name: OpenSearch
+        type: elasticsearch
+        url: https://OPENSEARCH_ENDPOINT:443  # terraform output opensearch_endpoint 결과로 교체
+        access: proxy
+        basicAuth: true
+        basicAuthUser: admin
+        secureJsonData:
+          basicAuthPassword: "${OPENSEARCH_PASSWORD}"  # opensearch_master_password와 동일
+        jsonData:
+          esVersion: "8.0.0"  # OpenSearch 호환 버전
+          tlsSkipVerify: true
+          timeField: "@timestamp"
+
+# 대시보드 프로비저닝 (선택)
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+# Ingress (선택 - LoadBalancer 대신 사용 시)
+# ingress:
+#   enabled: true
+#   hosts:
+#     - grafana.example.com

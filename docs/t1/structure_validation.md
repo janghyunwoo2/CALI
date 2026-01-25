@@ -13,8 +13,8 @@ CALI/
 ├── terraform/                  ✅ IaC
 ├── helm-values/                ✅ K8s 설정
 ├── k8s/                        ✅ 매니페스트
-├── log-generator/              ✅ 애플리케이션
-└── consumer/                   ✅ 애플리케이션
+├── apps/                       ✅ 애플리케이션(apps로 옮김)
+└── consumer/                   ✅ 애플리케이션(apps로 옮김
 ```
 
 **결과**: 6개 최상위 디렉토리 모두 필수 구성 완료 ✅

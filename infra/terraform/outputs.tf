@@ -62,12 +62,12 @@ output "eks_cluster_arn" {
 }
 
 # ------------------------------------------------------------------------------
-# Grafana
+# Grafana - Helm으로 EKS에 배포 예정, kubectl get svc로 확인
 # ------------------------------------------------------------------------------
-output "grafana_workspace_endpoint" {
-  description = "Grafana 워크스페이스 URL"
-  value       = aws_grafana_workspace.main.endpoint
-}
+# output "grafana_workspace_endpoint" {
+#   description = "Grafana 워크스페이스 URL"
+#   value       = aws_grafana_workspace.main.endpoint
+# }
 
 # ------------------------------------------------------------------------------
 # ECR

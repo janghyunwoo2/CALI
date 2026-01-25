@@ -16,12 +16,15 @@
 #     --region ap-northeast-2
 # ------------------------------------------------------------------------------
 
-terraform {
-  backend "s3" {
-    bucket         = "cali-terraform-state"
-    key            = "infra/terraform.tfstate"
-    region         = "ap-northeast-2"
-    encrypt        = true
-    dynamodb_table = "cali-terraform-lock"
-  }
-}
+# 로컬 테스트 시 주석 처리 (State가 로컬에 저장됨)
+# 팀 협업 / CI/CD 배포 시 주석 해제
+# terraform {
+#   backend "s3" {
+#     bucket         = "cali-terraform-state"
+#     key            = "infra/terraform.tfstate"
+#     region         = "ap-northeast-2"
+#     encrypt        = true
+#     dynamodb_table = "cali-terraform-lock"
+#   }
+# }
+

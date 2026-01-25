@@ -36,7 +36,8 @@ resource "aws_kinesis_firehose_delivery_stream" "to_s3" {
   extended_s3_configuration {
     role_arn   = aws_iam_role.firehose.arn
     bucket_arn = aws_s3_bucket.logs.arn
-    prefix     = "raw/dt=!{timestamp:yyyy-MM-dd}/"
+    prefix              = "raw/dt=!{timestamp:yyyy-MM-dd}/"
+    error_output_prefix = "raw-error/result=!{firehose:error-output-type}/"
 
     buffering_size     = 5
     buffering_interval = 60

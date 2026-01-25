@@ -61,14 +61,24 @@ resource "aws_opensearch_domain" "logs" {
       {
         Effect = "Allow"
         Principal = {
-          AWS = aws_iam_role.grafana.arn
+          AWS = "*"
         }
-        Action = [
-          "es:ESHttpGet",
-          "es:ESHttpPost"
-        ]
+        Action   = "es:*"
         Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
-      }
+      },
+      # Grafana 접근 정책 - Helm Grafana 사용으로 주석 처리
+      # Helm Grafana는 OpenSearch에 basicAuth로 직접 접근
+      # {
+      #   Effect = "Allow"
+      #   Principal = {
+      #     AWS = aws_iam_role.grafana.arn
+      #   }
+      #   Action = [
+      #     "es:ESHttpGet",
+      #     "es:ESHttpPost"
+      #   ]
+      #   Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
+      # }
     ]
   })
 

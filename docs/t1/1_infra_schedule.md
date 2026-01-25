@@ -77,8 +77,9 @@ cd infra/terraform
 # 1. 초기화
 terraform init
 
-# 2. 검증
+# 2. 문법 검증
 terraform validate
+# 2.1 미리보기
 terraform plan
 
 # 3. 배포
