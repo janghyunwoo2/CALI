@@ -47,3 +47,6 @@ airflow/airflow-webserver.pid
 
 # Docker
 docker-compose.override.yml
+
+# 아카이브 폴더
+.archive
