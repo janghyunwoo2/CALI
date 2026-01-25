@@ -117,6 +117,7 @@ aws eks update-kubeconfig --name cali-cluster --region ap-northeast-2
 helm install fluent-bit fluent/fluent-bit -f helm-values/fluent-bit.yaml
 helm install milvus milvus/milvus -f helm-values/milvus.yaml
 helm install airflow apache-airflow/airflow -f helm-values/airflow.yaml
+helm install grafana grafana/grafana -f helm-values/grafana.yaml
 ```
 
 ### Helm 배포 대상
@@ -126,6 +127,7 @@ helm install airflow apache-airflow/airflow -f helm-values/airflow.yaml
 | Fluent Bit | `fluent/fluent-bit` | `helm-values/fluent-bit.yaml` |
 | Milvus | `milvus/milvus` | `helm-values/milvus.yaml` |
 | Airflow | `apache-airflow/airflow` | `helm-values/airflow.yaml` |
+| Grafana | `grafana/grafana` | `helm-values/grafana.yaml` |
 
 ### 오후: Consumer & 앱 배포
 
@@ -141,6 +143,7 @@ helm install airflow apache-airflow/airflow -f helm-values/airflow.yaml
 - [ ] Consumer Pod Running
 - [ ] Milvus Standalone 동작
 - [ ] Airflow Web UI 접근 가능 (localhost:8080)
+- [ ] Grafana Web UI 접근 가능 (localhost:3000)
 - [ ] 로그 → Kinesis 흐름 확인
 
 ---
