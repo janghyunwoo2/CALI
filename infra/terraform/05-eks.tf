@@ -75,3 +75,38 @@ resource "aws_eks_node_group" "main" {
     Name = "${var.project_name}-node-group"
   }
 }
+
+# ------------------------------------------------------------------------------
+# OIDC Provider (IRSA용)
+# ------------------------------------------------------------------------------
+data "tls_certificate" "eks" {
+  url = aws_eks_cluster.main.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_openid_connect_provider" "eks" {
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
+  url             = aws_eks_cluster.main.identity[0].oidc[0].issuer
+}
+
+# ------------------------------------------------------------------------------
+# EKS Addons - EBS CSI Driver
+# ------------------------------------------------------------------------------
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name  = aws_eks_cluster.main.name
+  addon_name    = "aws-ebs-csi-driver"
+  addon_version = "v1.31.0-eksbuild.1" # Safe version for 1.29
+
+  depends_on = [
+    aws_eks_node_group.main,
+    aws_iam_role_policy_attachment.eks_ebs_csi_driver_policy
+  ]
+}
+
+# ------------------------------------------------------------------------------
+# EBS CSI Driver IAM Policy for Node Group
+# ------------------------------------------------------------------------------
+resource "aws_iam_role_policy_attachment" "eks_ebs_csi_driver_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+  role       = aws_iam_role.eks_node.name
+}

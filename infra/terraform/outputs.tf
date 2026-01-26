@@ -89,3 +89,11 @@ output "kubectl_config_command" {
   description = "kubectl 연결 명령어"
   value       = "aws eks update-kubeconfig --name ${aws_eks_cluster.main.name} --region ${var.aws_region}"
 }
+
+# ------------------------------------------------------------------------------
+# App Role (IRSA)
+# ------------------------------------------------------------------------------
+output "app_role_arn" {
+  description = "Application IRSA Role ARN (Consumer, Fluent Bit)"
+  value       = aws_iam_role.app_role.arn
+}

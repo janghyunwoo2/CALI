@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+  labels:
+    app: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consumer
+  template:
+    metadata:
+      labels:
+        app: consumer
+    spec:
+      serviceAccountName: consumer-sa # IRSA용 ServiceAccount
+      containers:
+        - name: consumer
+          image: 827913617635.dkr.ecr.ap-northeast-2.amazonaws.com/cali/consumer:latest
+          imagePullPolicy: Always
+          env:
+            - name: KINESIS_STREAM_NAME
+              value: "cali-logs-stream"
+            - name: S3_DLQ_BUCKET
+              value: "cali-logs-827913617635"
+            - name: AWS_REGION
+              value: "ap-northeast-2"
+            - name: MILVUS_HOST
+              value: "milvus-standalone"
+            - name: MILVUS_PORT
+              value: "19530"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: openai-api-key
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: slack-webhook-url
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: consumer-sa
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::827913617635:role/cali-app-role

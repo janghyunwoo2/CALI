@@ -223,3 +223,42 @@ resource "aws_iam_role_policy_attachment" "firehose_opensearch" {
 #   role       = aws_iam_role.grafana.name
 # }
 
+
+# ------------------------------------------------------------------------------
+# IRSA Role (Consumer & Fluent Bit용)
+# ------------------------------------------------------------------------------
+resource "aws_iam_role" "app_role" {
+  name = "${var.project_name}-app-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.eks.arn
+      }
+      Condition = {
+        StringLike = {
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:*:*"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "app_kinesis" {
+  policy_arn = aws_iam_policy.kinesis_access.arn
+  role       = aws_iam_role.app_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "app_s3_read" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+  role       = aws_iam_role.app_role.name
+}
+
+# Fluent Bit 로깅에 필요한 기본 권한
+resource "aws_iam_role_policy_attachment" "app_cloudwatch" {
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+  role       = aws_iam_role.app_role.name
+}

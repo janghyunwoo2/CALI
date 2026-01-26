@@ -10,6 +10,7 @@
 resource "aws_ecr_repository" "consumer" {
   name                 = "${var.project_name}/consumer"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -26,6 +27,7 @@ resource "aws_ecr_repository" "consumer" {
 resource "aws_ecr_repository" "log_generator" {
   name                 = "${var.project_name}/log-generator"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
