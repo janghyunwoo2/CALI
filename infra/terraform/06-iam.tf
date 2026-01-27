@@ -183,48 +183,6 @@ resource "aws_iam_role_policy_attachment" "firehose_opensearch" {
 }
 
 # ------------------------------------------------------------------------------
-# Grafana Role (AMG용) - Helm Grafana 사용으로 주석 처리
-# ------------------------------------------------------------------------------
-# resource "aws_iam_role" "grafana" {
-#   name = "${var.project_name}-grafana-role"
-#
-#   assume_role_policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [{
-#       Action = "sts:AssumeRole"
-#       Effect = "Allow"
-#       Principal = {
-#         Service = "grafana.amazonaws.com"
-#       }
-#     }]
-#   })
-# }
-
-# resource "aws_iam_policy" "grafana_opensearch" {
-#   name        = "${var.project_name}-grafana-opensearch"
-#   description = "Grafana OpenSearch 읽기 권한"
-#
-#   policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [{
-#       Effect = "Allow"
-#       Action = [
-#         "es:ESHttpGet",
-#         "es:ESHttpPost",
-#         "es:DescribeElasticsearchDomain"
-#       ]
-#       Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-*"
-#     }]
-#   })
-# }
-
-# resource "aws_iam_role_policy_attachment" "grafana_opensearch" {
-#   policy_arn = aws_iam_policy.grafana_opensearch.arn
-#   role       = aws_iam_role.grafana.name
-# }
-
-
-# ------------------------------------------------------------------------------
 # IRSA Role (Consumer & Fluent Bit용)
 # ------------------------------------------------------------------------------
 resource "aws_iam_role" "app_role" {
@@ -261,4 +219,56 @@ resource "aws_iam_role_policy_attachment" "app_s3_read" {
 resource "aws_iam_role_policy_attachment" "app_cloudwatch" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
   role       = aws_iam_role.app_role.name
+}
+
+# ------------------------------------------------------------------------------
+# Cluster Autoscaler Role (IRSA)
+# ------------------------------------------------------------------------------
+resource "aws_iam_role" "cluster_autoscaler" {
+  name = "${var.project_name}-cluster-autoscaler-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.eks.arn
+      }
+      Condition = {
+        StringEquals = {
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:kube-system:cluster-autoscaler"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_policy" "cluster_autoscaler" {
+  name        = "${var.project_name}-cluster-autoscaler-policy"
+  description = "Cluster Autoscaler 권한"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:DescribeAutoScalingGroups",
+          "autoscaling:DescribeAutoScalingInstances",
+          "autoscaling:DescribeLaunchConfigurations",
+          "autoscaling:DescribeTags",
+          "autoscaling:SetDesiredCapacity",
+          "autoscaling:TerminateInstanceInAutoScalingGroup",
+          "ec2:DescribeLaunchTemplateVersions"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "cluster_autoscaler" {
+  policy_arn = aws_iam_policy.cluster_autoscaler.arn
+  role       = aws_iam_role.cluster_autoscaler.name
 }

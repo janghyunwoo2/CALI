@@ -77,6 +77,29 @@ resource "aws_eks_node_group" "main" {
 }
 
 # ------------------------------------------------------------------------------
+# EKS Access Entries (팀원 접근 권한)
+# ------------------------------------------------------------------------------
+# 변수(team_members_arns)에 등록된 팀원들에게 관리자(Admin) 권한 부여
+
+resource "aws_eks_access_entry" "team_members" {
+  for_each      = toset(var.team_members_arns)
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = each.value
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "team_members_admin" {
+  for_each      = toset(var.team_members_arns)
+  cluster_name  = aws_eks_cluster.main.name
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+  principal_arn = each.value
+
+  access_scope {
+    type = "cluster"
+  }
+}
+
+# ------------------------------------------------------------------------------
 # OIDC Provider (IRSA용)
 # ------------------------------------------------------------------------------
 data "tls_certificate" "eks" {

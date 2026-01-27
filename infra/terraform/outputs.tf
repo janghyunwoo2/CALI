@@ -97,3 +97,8 @@ output "app_role_arn" {
   description = "Application IRSA Role ARN (Consumer, Fluent Bit)"
   value       = aws_iam_role.app_role.arn
 }
+
+output "cluster_autoscaler_role_arn" {
+  description = "Cluster Autoscaler Role ARN"
+  value       = aws_iam_role.cluster_autoscaler.arn
+}

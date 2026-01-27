@@ -16,7 +16,8 @@ webserver:
 
 dags:
   gitSync:
-    enabled: false
-    # repo: https://github.com/janghyunwoo2/CALI.git
-    # branch: main
-    # subPath: dags
+    enabled: true
+    repo: https://github.com/janghyunwoo2/CALI.git
+    branch: main
+    subPath: dags
+    wait: 60
