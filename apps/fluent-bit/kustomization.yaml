@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 설정 파일을 기반으로 ConfigMap 생성 (이름에 해시가 붙지 않도록 설정)
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: fluent-bit-custom-config
+    namespace: default
+    files:
+      - fluent-bit.conf
+      - parsers.conf
