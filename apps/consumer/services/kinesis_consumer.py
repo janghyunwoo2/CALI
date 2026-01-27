@@ -1,6 +1,6 @@
 """
 =====================================================
-Kinesis Stream Consumer
+Kinesis Stream Consumer # TEST
 =====================================================
 설명: Kinesis Data Stream에서 로그를 실시간으로 구독
 역할: 데이터 수신 → Pydantic 검증 → 후속 처리 트리거
