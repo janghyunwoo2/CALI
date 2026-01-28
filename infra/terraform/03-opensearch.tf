@@ -95,3 +95,35 @@ variable "opensearch_master_password" {
   type        = string
   sensitive   = true
 }
+
+# ------------------------------------------------------------------------------
+# OpenSearch 권한 매핑 자동화 (FGAC)
+# ------------------------------------------------------------------------------
+# Terraform 생성 만으로는 내부 DB(Security Plugin)에 IAM Role이 매핑되지 않아
+# Firehose가 접근 거부됨. 이를 해결하기 위해 kubectl로 API 호출 (일회성).
+resource "null_resource" "opensearch_mapping" {
+  triggers = {
+    endpoint = aws_opensearch_domain.logs.endpoint
+    role_arn = aws_iam_role.firehose.arn
+  }
+
+  provisioner "local-exec" {
+    # Windows PowerShell에서 실행
+    interpreter = ["PowerShell", "-Command"]
+
+    # 주의: JSON 내 따옴표(") 이스케이프 처리가 중요함.
+    # Firehose Role을 all_access 그룹에 매핑
+    command = <<EOT
+      $env:Path += ";C:\Program Files\Amazon\AWSCLIV2"; 
+      aws eks update-kubeconfig --name ${var.project_name}-cluster --region ${var.aws_region};
+      kubectl run os-mapping-job --image=curlimages/curl --restart=Never --command -- curl -k -u admin:${var.opensearch_master_password} -X PATCH "https://${aws_opensearch_domain.logs.endpoint}/_plugins/_security/api/rolesmapping/all_access" -H "Content-Type: application/json" -d '[{\"op\": \"add\", \"path\": \"/backend_roles\", \"value\": [\"${aws_iam_role.firehose.arn}\"]}]'
+      Start-Sleep -Seconds 10
+      kubectl delete pod os-mapping-job
+    EOT
+  }
+
+  depends_on = [
+    aws_opensearch_domain.logs,
+    aws_iam_role.firehose
+  ]
+}
