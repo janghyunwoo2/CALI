@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     THROTTLE_MAX_ALERTS: int = 5
 
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file=".env",  
         env_file_encoding="utf-8",
         extra="ignore"  # env 파일에 정의되지 않은 변수가 있어도 무시함
     )

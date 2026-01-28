@@ -10,7 +10,11 @@ class LogRecord(BaseModel):
     # 핵심: 비정형 로그 전문을 담는 필드 (LLM 분석용)
     log_content: Optional[str] = Field(None, description="상세 스택트레이스 전문")
     
-    # 메타데이터
+    # 메타데이터 (프로덕션 로그 포맷 반영)
+    version: Optional[str] = None
+    trace_id: Optional[str] = None
+    platform: Optional[str] = None
+    environment: Optional[str] = None
     pod_name: Optional[str] = None
     error_code: Optional[str] = None
 
