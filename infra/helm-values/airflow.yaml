@@ -1,6 +1,15 @@
 # Airflow Helm Values
 executor: "LocalExecutor"
 
+# Explicitly enable standard jobs for DB migration and User creation
+migrateDatabaseJob:
+  enabled: true
+
+# createUserJob:
+#   enabled: true
+#   useHelmHooks: false
+#   applyCustomEnv: false
+
 airflow:
   config:
     AIRFLOW__CORE__LOAD_EXAMPLES: "False"
