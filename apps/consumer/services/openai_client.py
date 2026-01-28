@@ -10,6 +10,19 @@ class OpenAIClient:
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = "gpt-4o" # MVP 모델 고정
 
+    
+    def create_embedding(self, text: str) -> list:
+        """텍스트 임베딩 생성 (text-embedding-3-small)"""
+        try:
+            response = self.client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패: {e}")
+            return []
+
     def analyze_log(self, current_log: dict, similar_cases: list = None) -> dict:
         try:
             prompt = self._build_rag_prompt(current_log, similar_cases or [])

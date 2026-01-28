@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     KINESIS_STREAM_NAME: Optional[str] = "pending"
     S3_DLQ_BUCKET: Optional[str] = "pending"
     
+    # Milvus 설정
+    MILVUS_HOST: str
+    MILVUS_PORT: int
+    MILVUS_COLLECTION_NAME: str
+    VECTOR_DIMENSION: int
+
     # 기본값 설정
     THROTTLE_WINDOW_SECONDS: int = 60
     THROTTLE_MAX_ALERTS: int = 5
