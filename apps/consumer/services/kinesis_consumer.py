@@ -86,8 +86,19 @@ class KinesisConsumer:
         """레코드 배치 처리"""
         for record in records:
             try:
-                # 1. Kinesis 데이터 디코딩
-                raw_data = json.loads(record["Data"].decode("utf-8"))
+                # 1. Kinesis 데이터 디코딩 및 전처리
+                raw_str = record["Data"].decode("utf-8")
+                
+                # [DATA received from shardId...] 접두어 제거
+                if "[DATA received from" in raw_str:
+                    try:
+                        # 접두어 뒤의 실제 JSON 부분만 추출
+                        # 예: "[DATA...] {"level":...}" -> "{"level":...}"
+                        raw_str = raw_str.split("]: ", 1)[1]
+                    except IndexError:
+                        logger.warning(f"메타데이터 제거 실패, 원본 사용: {raw_str[:50]}...")
+
+                raw_data = json.loads(raw_str)
 
                 # 2. Pydantic 검증
                 log_record = LogRecord(**raw_data)
