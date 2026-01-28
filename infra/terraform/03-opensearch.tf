@@ -115,6 +115,7 @@ resource "null_resource" "opensearch_mapping" {
     # Firehose Role을 all_access 그룹에 매핑
     command = <<EOT
       $env:Path += ";C:\Program Files\Amazon\AWSCLIV2"; 
+      aws eks update-kubeconfig --name ${var.project_name}-cluster --region ${var.aws_region};
       kubectl run os-mapping-job --image=curlimages/curl --restart=Never --command -- curl -k -u admin:${var.opensearch_master_password} -X PATCH "https://${aws_opensearch_domain.logs.endpoint}/_plugins/_security/api/rolesmapping/all_access" -H "Content-Type: application/json" -d '[{\"op\": \"add\", \"path\": \"/backend_roles\", \"value\": [\"${aws_iam_role.firehose.arn}\"]}]'
       Start-Sleep -Seconds 10
       kubectl delete pod os-mapping-job

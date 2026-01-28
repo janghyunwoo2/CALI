@@ -32,6 +32,11 @@ resource "aws_eks_cluster" "main" {
     endpoint_public_access  = true
   }
 
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   enabled_cluster_log_types = ["api", "audit", "authenticator"]
 
   depends_on = [
@@ -97,6 +102,10 @@ resource "aws_eks_access_policy_association" "team_members_admin" {
   access_scope {
     type = "cluster"
   }
+
+  depends_on = [
+    aws_eks_access_entry.team_members
+  ]
 }
 
 # ------------------------------------------------------------------------------

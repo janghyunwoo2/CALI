@@ -54,6 +54,8 @@ kubectl get nodes
 ```
 
 ### 서비스별 배포 명령어
+#### 0) sc 생성(pvc 용) airflow, milvus 용
+kubectl apply -f ../k8s/storage-class.yaml && kubectl get sc
 
 #### 1) Fluent Bit (로그 수집)
 ```bash
@@ -150,6 +152,8 @@ kubectl delete -f k8s/log-generator-deployment.yaml
 ```
 
 ---
+
+
 
 ## 3. 유용한 확인 명령어
 
