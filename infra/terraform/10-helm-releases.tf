@@ -26,6 +26,11 @@ resource "helm_release" "airflow" {
     value = "11"
   }
 
+  set {
+    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = aws_iam_role.airflow_role.arn
+  }
+
   depends_on = [
     kubernetes_storage_class.gp2
   ]

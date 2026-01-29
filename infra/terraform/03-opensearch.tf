@@ -95,6 +95,18 @@ variable "opensearch_master_password" {
 }
 
 # ------------------------------------------------------------------------------
+# OpenSearch Index Template Management (Managed by Terraform Provider)
+# ------------------------------------------------------------------------------
+resource "opensearch_index_template" "logs" {
+  name = "cali-logs-template"
+  body = file("${path.module}/opensearch_template.json")
+
+  depends_on = [
+    aws_opensearch_domain.logs
+  ]
+}
+
+# ------------------------------------------------------------------------------
 # OpenSearch 권한 매핑 자동화 (FGAC)
 # ------------------------------------------------------------------------------
 # Terraform 생성 만으로는 내부 DB(Security Plugin)에 IAM Role이 매핑되지 않아
