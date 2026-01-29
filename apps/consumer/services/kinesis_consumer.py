@@ -19,6 +19,7 @@ from services.milvus_client import MilvusClient
 from services.openai_client import OpenAIClient
 from services.s3_dlq import S3DLQ
 from services.slack_notifier import SlackNotifier
+from services.throttle import Throttle
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -37,6 +38,7 @@ class KinesisConsumer:
         self.ai_client = OpenAIClient()
         self.slack_notifier = SlackNotifier()
         self.dlq = S3DLQ()
+        self.throttle = Throttle()
         
         # 샤드 관리를 위한 상태
         self.shard_iterator = None
@@ -129,6 +131,10 @@ class KinesisConsumer:
     def _run_rag_pipeline(self, log_record: LogRecord):
         """RAG 분석 및 알림 파이프라인"""
         try:
+            # 0. 스로틀링 체크 (과도한 알림 방지)
+            if not self.throttle.should_send_alert(log_record.service, log_record.message):
+                return
+
             # 1. 임베딩 생성 (검색용 쿼리)
             # 로그 메시지와 상세 내용을 조합하여 쿼리 구성
             query_text = f"{log_record.message} {log_record.log_content or ''}"[:8000]
@@ -145,11 +151,7 @@ class KinesisConsumer:
             # 4. Slack 알림 전송
             self.slack_notifier.send_alert(log_record.model_dump(), analysis_result)
             
-            # 5. 자가 학습 (Auto-Learning)
-            # 분석 완료된 데이터를 다시 Milvus에 저장하여 지식 축적
-            knowledge_data = log_record.model_dump()
-            knowledge_data.update(analysis_result) # cause, action 추가
-            self.milvus_client.insert_log_case(knowledge_data, embedding)
+            # [삭제됨] 자가 학습 (Auto-Learning) 로직 제거됨 (User Request)
             
         except Exception as e:
             logger.error(f"RAG 파이프라인 처리 실패: {e}")
