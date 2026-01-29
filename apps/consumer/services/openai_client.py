@@ -1,70 +1,54 @@
-"""
-=====================================================
-OpenAI RAG 분석 클라이언트
-=====================================================
-설명: OpenAI GPT-4o를 사용한 지능형 로그 분석
-역할: 과거 사례 기반 원인 분석 및 조치 권고안 생성
-=====================================================
-"""
-
 from openai import OpenAI
-from typing import Dict, Any, List
-
 from config.settings import settings
 from utils.logger import setup_logger
+import json
 
 logger = setup_logger(__name__)
 
-
 class OpenAIClient:
-    """OpenAI RAG 분석 클라이언트"""
-    
     def __init__(self):
-        """초기화"""
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = settings.OPENAI_MODEL
-        logger.info(f"OpenAI 클라이언트 초기화: {self.model}")
+        self.model = "gpt-4o" # MVP 모델 고정
+
     
-    def analyze_log(
-        self, 
-        current_log: Dict[str, Any], 
-        similar_cases: List[Dict[str, Any]]
-    ) -> Dict[str, str]:
-        """
-        로그 분석 및 조치 권고안 생성
-        
-        Args:
-            current_log: 현재 분석할 로그
-            similar_cases: Milvus에서 검색한 유사 과거 사례
-        
-        Returns:
-            {"cause": "원인 분석", "action": "조치 권고안"}
-        """
+    def create_embedding(self, text: str) -> list:
+        """텍스트 임베딩 생성 (text-embedding-3-small)"""
         try:
-            # TODO: RAG 프롬프트 구성
-            prompt = self._build_rag_prompt(current_log, similar_cases)
-            
-            # TODO: OpenAI API 호출
-            # response = self.client.chat.completions.create(...)
-            
-            # TODO: 응답 파싱
-            return {
-                "cause": "TODO: 원인 분석",
-                "action": "TODO: 조치 권고안"
-            }
-            
+            response = self.client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text
+            )
+            return response.data[0].embedding
         except Exception as e:
-            logger.error(f"OpenAI 분석 오류: {e}")
-            return {
-                "cause": "분석 실패",
-                "action": "수동 확인 필요"
-            }
-    
-    def _build_rag_prompt(
-        self, 
-        current_log: Dict[str, Any], 
-        similar_cases: List[Dict[str, Any]]
-    ) -> str:
-        """RAG 프롬프트 생성"""
-        # TODO: 체계적인 프롬프트 구성
-        return f"현재 로그: {current_log}\n유사 사례: {similar_cases}"
+            logger.error(f"임베딩 생성 실패: {e}")
+            return []
+
+    def analyze_log(self, current_log: dict, similar_cases: list = None) -> dict:
+        try:
+            prompt = self._build_rag_prompt(current_log, similar_cases or [])
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "당신은 SRE 전문가입니다. 로그를 분석하여 원인과 조치법을 JSON으로 답하세요. 필드: cause, action"},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            logger.error(f"분석 실패: {e}")
+            return {"cause": "분석 엔진 오류", "action": "로그 전문 수동 확인 요망"}
+
+    def _build_rag_prompt(self, current_log: dict, similar_cases: list) -> str:
+        # 지식 베이스가 없을 때는 로그 정보에 집중하도록 구성
+        case_text = f"참고 사례: {similar_cases}" if similar_cases else "참고할 과거 사례 없음."
+        return f"""
+        분석할 로그:
+        - 서비스: {current_log.get('service')}
+        - 에러: {current_log.get('message')}
+        - 상세내용: {current_log.get('log_content')}
+        
+        {case_text}
+        
+        위 내용을 바탕으로 장애 원인(cause)과 운영자가 즉시 취해야 할 조치(action)를 한글로 작성하세요.
+        """

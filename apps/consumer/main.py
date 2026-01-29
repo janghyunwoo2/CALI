@@ -1,28 +1,24 @@
-"""
-=====================================================
-Consumer 메인 엔트리포인트
-=====================================================
-설명: Kinesis Stream 구독 및 로그 처리 메인 루프
-역할: 데이터 수신 → 검증 → 분석 → 알림
-=====================================================
-"""
-
-from config.settings import settings
+import time
 from services.kinesis_consumer import KinesisConsumer
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-
 def main():
-    """메인 실행 함수"""
-    logger.info("CALI Consumer 시작")
-    logger.info(f"Kinesis Stream: {settings.KINESIS_STREAM_NAME}")
+    """CALI Consumer 메인 엔트리포인트 (Production Loop)"""
+    logger.info("🚀 CALI Consumer 애플리케이션 시작")
     
-    # TODO: Kinesis Consumer 초기화 및 실행
-    # consumer = KinesisConsumer()
-    # consumer.start()
-
+    try:
+        # Kinesis Client 초기화 및 루프 시작
+        # 내부적으로 Milvus, OpenAI, Slack, DLQ 모두 연동됨
+        consumer = KinesisConsumer()
+        consumer.start()
+        
+    except KeyboardInterrupt:
+        logger.info("🛑 사용자 요청에 의한 중단")
+    except Exception as e:
+        logger.critical(f"💀 Consumer 프로세스 비정상 종료: {e}")
+        raise e
 
 if __name__ == "__main__":
     main()
