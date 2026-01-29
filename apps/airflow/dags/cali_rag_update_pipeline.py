@@ -7,30 +7,23 @@ from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook 
 from airflow.operators.python import PythonOperator 
 
-# --- [추가] Milvus 및 임베딩 라이브러리 ---
-# 주의: 이 라이브러리들이 Airflow Worker 환경에 설치되어 있어야 함
-from pymilvus import connections, Collection, utility
-from sentence_transformers import SentenceTransformer
-
-# 1. cali 프로젝트 환경 설정
+# 1. 환경 설정
 BUCKET_NAME = os.getenv('S3_BACKUP_BUCKET')
 SOLUTIONS_PREFIX = 'solutions/'
 PROCESSED_PREFIX = 'processed/'
 SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL')
 
-# --- [추가] Milvus 설정 ---
-MILVUS_HOST = os.getenv('MILVUS_HOST', 'milvus-standalone') # EKS 내부 서비스 도메인
+MILVUS_HOST = os.getenv('MILVUS_HOST', 'milvus-standalone')
 MILVUS_PORT = '19530'
-COLLECTION_NAME = 'cali_rag_collection' # 미리 생성해둔 컬렉션 이름
+COLLECTION_NAME = 'cali_rag_collection'
+SIMILARITY_THRESHOLD = 0.1  # L2 거리 기준 (0에 가까울수록 똑같음)
 
-# 2. 모든 태스크에 적용할 공통 옵션
 default_args = {
     'owner': 'cali_admin',
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
 }
 
-# 3. cali 프로젝트 공장(DAG) 설계도 시작
 with DAG(
     dag_id='cali_rag_unified_pipeline',
     default_args=default_args,
@@ -40,7 +33,6 @@ with DAG(
     tags=['cali', 'rag', 'milvus']
 ) as dag:
 
-    # --- [Step 1] S3 센서 (생략) ---
     wait_for_file = S3KeySensor(
         task_id='wait_for_s3_file',
         bucket_name=BUCKET_NAME,
@@ -51,11 +43,13 @@ with DAG(
         mode='poke'
     )
 
-    # --- [Step 2] 통합 비즈니스 로직 (수정됨) ---
     def process_cali_rag_logic(**context):
+        # --- [중요] 라이브러리가 없을 때 스케줄러가 죽는 것을 방지하기 위해 함수 내부에서 import ---
+        from pymilvus import connections, Collection, utility
+        from sentence_transformers import SentenceTransformer
+        
         s3_hook = S3Hook(aws_conn_id='aws_default')
         
-        # [S3 조회]
         all_files = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix=SOLUTIONS_PREFIX)
         txt_files = [f for f in all_files if f.endswith('.txt') and f != SOLUTIONS_PREFIX]
         
@@ -65,36 +59,48 @@ with DAG(
         target_file = txt_files[0]
         content = s3_hook.read_key(target_file, BUCKET_NAME)
         
-        # [품질 검증]
         if len(content.strip()) < 20:
             s3_hook.delete_objects(bucket=BUCKET_NAME, keys=target_file)
             raise ValueError(f"❌ 내용 부실 데이터 삭제 완료: {target_file}")
 
-        # --- [신규 추가] Milvus 적재 로직 ---
         try:
-            # 1. Milvus 연결
+            # 1. Milvus 연결 및 모델 로드
             connections.connect("default", host=MILVUS_HOST, port=MILVUS_PORT)
-            
-            # 2. 임베딩 모델 로드 (한국어 성능 위주 모델)
-            # Worker 메모리 상황에 따라 모델명 조절 가능
             model = SentenceTransformer('snunlp/KR-SBERT-V40K-klueNLI-aug')
             vector = model.encode(content).tolist()
             
-            # 3. 컬렉션 로드
             collection = Collection(COLLECTION_NAME)
-            
-            # 4. 데이터 삽입 (스키마 구조: id, vector, raw_text)
-            # id를 자동생성(auto_id)으로 설정했다면 vector와 text만 넣으면 됨
-            data = [
-                [vector],
-                [content]
-            ]
-            collection.insert(data)
-            collection.flush() # 즉시 반영
-            print(f"🚀 Milvus 적재 완료: {target_file} (Vector Dim: {len(vector)})")
+            collection.load() # 검색을 위해 메모리 로드
+
+            # 2. [추가] 유사도 검색을 통한 중복 체크
+            search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+            results = collection.search(
+                data=[vector], 
+                anns_field="vector", 
+                param=search_params, 
+                limit=1,
+                output_fields=["raw_text"]
+            )
+
+            is_duplicate = False
+            if results and len(results[0]) > 0:
+                hit = results[0][0]
+                # L2 거리가 너무 가까우면 중복으로 간주
+                if hit.distance < SIMILARITY_THRESHOLD:
+                    is_duplicate = True
+                    print(f"⚠️ 중복 감지: 이미 존재하는 지식입니다. (Distance: {hit.distance})")
+
+            # 3. 중복이 아닐 때만 적재
+            if not is_duplicate:
+                data = [[vector], [content]]
+                collection.insert(data)
+                collection.flush()
+                print(f"🚀 Milvus 적재 성공: {target_file}")
+            else:
+                print(f"⏭ 중복 데이터라 적재를 건너뜁니다.")
             
         except Exception as e:
-            print(f"❌ Milvus 적재 실패: {str(e)}")
+            print(f"❌ 작업 중 오류 발생: {str(e)}")
             raise e
         finally:
             connections.disconnect("default")
@@ -113,10 +119,8 @@ with DAG(
         python_callable=process_cali_rag_logic
     )
 
-    # --- [Step 3] Slack 보고 ---
     def send_report(**context):
-        msg = "✅ [cali 프로젝트] RAG 지식 베이스 업데이트 성공! 🚀"
-        print(f"Slack Notification: {msg}")
+        msg = "✅ [cali 프로젝트] RAG 지식 베이스 업데이트 완료! (중복 체크 포함) 🚀"
         if SLACK_WEBHOOK_URL:
             requests.post(SLACK_WEBHOOK_URL, data=json.dumps({"text": msg}))
 
