@@ -1,56 +1,27 @@
-"""
-=====================================================
-Pydantic 로그 스키마 정의
-=====================================================
-설명: Fluent Bit에서 전송된 로그의 2차 검증 스키마
-역할: 데이터 무결성 보장 및 타입 안정성 확보
-=====================================================
-"""
-
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
-
 class LogRecord(BaseModel):
-    """로그 레코드 스키마"""
+    timestamp: datetime = Field(default_factory=datetime.now)
+    level: str = Field(..., description="ERROR, WARN 등")
+    service: str = Field(..., description="서비스명")
+    message: str = Field(..., description="짧은 요약")
+    # 핵심: 비정형 로그 전문을 담는 필드 (LLM 분석용)
+    log_content: Optional[str] = Field(None, description="상세 스택트레이스 전문")
     
-    timestamp: datetime = Field(..., description="로그 발생 시간")
-    level: str = Field(..., description="로그 레벨 (ERROR, WARN, INFO 등)")
-    service: str = Field(..., description="서비스 이름 (예: payment-api)")
-    message: str = Field(..., description="로그 메시지")
-    
-    # Kubernetes 메타데이터
-    namespace: Optional[str] = Field(None, description="K8s 네임스페이스")
-    pod_name: Optional[str] = Field(None, description="K8s Pod 이름")
-    container_name: Optional[str] = Field(None, description="컨테이너 이름")
-    
-    # 추가 필드
-    error_code: Optional[str] = Field(None, description="에러 코드")
-    trace_id: Optional[str] = Field(None, description="분산 추적 ID")
-    
+    # 메타데이터 (프로덕션 로그 포맷 반영)
+    version: Optional[str] = None
+    trace_id: Optional[str] = None
+    platform: Optional[str] = None
+    environment: Optional[str] = None
+    pod_name: Optional[str] = None
+    error_code: Optional[str] = None
+
     @field_validator("level")
     @classmethod
     def validate_level(cls, v: str) -> str:
-        """로그 레벨 검증"""
-        allowed_levels = ["DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CRITICAL", "FATAL"]
+        allowed = ["DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"]
         v_upper = v.upper()
-        if v_upper not in allowed_levels:
-            raise ValueError(f"Invalid log level: {v}. Allowed: {allowed_levels}")
+        if v_upper not in allowed: return "INFO"
         return v_upper
-    
-    class Config:
-        """Pydantic 설정"""
-        json_schema_extra = {
-            "example": {
-                "timestamp": "2026-01-19T14:00:01",
-                "level": "ERROR",
-                "service": "payment-api",
-                "message": "DB Connection timeout",
-                "namespace": "production",
-                "pod_name": "payment-api-7d8f9c-abc123",
-                "container_name": "payment-api",
-                "error_code": "DB_504",
-                "trace_id": "xyz-789"
-            }
-        }

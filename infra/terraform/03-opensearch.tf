@@ -1,0 +1,131 @@
+# ==============================================================================
+# CALI Infrastructure - OpenSearch Domain
+# ==============================================================================
+# 로그 인덱싱 및 검색용 OpenSearch Service
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# OpenSearch Domain
+# ------------------------------------------------------------------------------
+resource "aws_opensearch_domain" "logs" {
+  domain_name    = "${var.project_name}-logs"
+  engine_version = "OpenSearch_2.11"
+
+  cluster_config {
+    instance_type  = "t3.small.search"
+    instance_count = 1
+
+    zone_awareness_enabled = false
+  }
+
+  ebs_options {
+    ebs_enabled = true
+    volume_type = "gp3"
+    volume_size = 20
+  }
+
+  encrypt_at_rest {
+    enabled = true
+  }
+
+  node_to_node_encryption {
+    enabled = true
+  }
+
+  domain_endpoint_options {
+    enforce_https       = true
+    tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
+  }
+
+  advanced_security_options {
+    enabled                        = true
+    internal_user_database_enabled = true
+
+    master_user_options {
+      master_user_name     = "admin"
+      master_user_password = var.opensearch_master_password
+    }
+  }
+
+  access_policies = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.firehose.arn
+        }
+        Action   = "es:*"
+        Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
+      },
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = flatten([
+            var.team_members_arns,
+            aws_iam_role.grafana.arn
+          ])
+        }
+        Action   = "es:*"
+        Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
+      },
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action   = "es:*"
+        Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
+      },
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-logs"
+  }
+}
+
+# ------------------------------------------------------------------------------
+# OpenSearch Password (Secrets Manager 권장)
+# ------------------------------------------------------------------------------
+variable "opensearch_master_password" {
+  description = "OpenSearch 마스터 비밀번호 (최소 8자, 대소문자+숫자+특수문자)"
+  type        = string
+  sensitive   = true
+}
+
+# ------------------------------------------------------------------------------
+# OpenSearch 권한 매핑 자동화 (FGAC)
+# ------------------------------------------------------------------------------
+# Terraform 생성 만으로는 내부 DB(Security Plugin)에 IAM Role이 매핑되지 않아
+# Firehose가 접근 거부됨. 이를 해결하기 위해 kubectl로 API 호출 (일회성).
+resource "null_resource" "opensearch_mapping" {
+  triggers = {
+    endpoint  = aws_opensearch_domain.logs.endpoint
+    role_arn  = aws_iam_role.firehose.arn
+    team_arns = join(",", var.team_members_arns)
+    timestamp = timestamp() # Force re-run again
+  }
+
+  provisioner "local-exec" {
+    # Windows PowerShell에서 실행
+    interpreter = ["PowerShell", "-Command"]
+
+    # 주의: JSON 내 따옴표(") 이스케이프 처리가 중요함.
+    # Firehose Role 및 팀원들을 all_access 그룹에 매핑
+    command = <<EOT
+      kubectl run os-mapping-job --image=curlimages/curl --restart=Never --command -- curl -k -u admin:${var.opensearch_master_password} -X PATCH "https://${aws_opensearch_domain.logs.endpoint}/_plugins/_security/api/rolesmapping/all_access" -H "Content-Type: application/json" -d '[${replace(jsonencode({
+    op    = "replace"
+    path  = "/backend_roles"
+    value = concat([aws_iam_role.firehose.arn], var.team_members_arns)
+}), "\"", "\\\"")}]'
+      Start-Sleep -Seconds 10
+      kubectl delete pod os-mapping-job
+    EOT
+}
+
+depends_on = [
+  aws_opensearch_domain.logs,
+  aws_iam_role.firehose
+]
+}

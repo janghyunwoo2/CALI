@@ -1,0 +1,7 @@
+serviceAccount:
+  create: true
+  name: fluent-bit-sa
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::827913617635:role/cali-app-role
+
+existingConfigMap: fluent-bit-custom-config

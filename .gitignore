@@ -20,6 +20,8 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+*.tfvars
+terraform.tfvars
 
 # Environment
 .env
@@ -47,3 +49,9 @@ airflow/airflow-webserver.pid
 
 # Docker
 docker-compose.override.yml
+
+# 아카이브 폴더
+.archive
+
+# Agent
+# .agent

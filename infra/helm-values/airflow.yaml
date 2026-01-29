@@ -1,0 +1,32 @@
+# Airflow Helm Values
+executor: "LocalExecutor"
+
+# Explicitly enable standard jobs for DB migration and User creation
+migrateDatabaseJob:
+  enabled: true
+
+# createUserJob:
+#   enabled: true
+#   useHelmHooks: false
+#   applyCustomEnv: false
+
+airflow:
+  config:
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+
+serviceAccount:
+  create: true
+  name: airflow-sa
+
+webserver:
+  service:
+    type: LoadBalancer
+
+dags:
+  gitSync:
+    enabled: true
+    repo: https://github.com/janghyunwoo2/CALI.git
+    branch: feat/t4/airflow
+    subPath: dags
+    wait: 60
