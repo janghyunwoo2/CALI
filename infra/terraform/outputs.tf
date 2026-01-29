@@ -102,3 +102,33 @@ output "cluster_autoscaler_role_arn" {
   description = "Cluster Autoscaler Role ARN"
   value       = aws_iam_role.cluster_autoscaler.arn
 }
+
+# ------------------------------------------------------------------------------
+# Service Access (LoadBalancers)
+# ------------------------------------------------------------------------------
+
+data "kubernetes_service" "airflow_webserver" {
+  metadata {
+    name      = "airflow-webserver"
+    namespace = "airflow"
+  }
+  depends_on = [helm_release.airflow]
+}
+
+data "kubernetes_service" "grafana" {
+  metadata {
+    name      = "grafana"
+    namespace = "monitoring"
+  }
+  depends_on = [helm_release.grafana]
+}
+
+output "airflow_webserver_url" {
+  description = "Airflow Webserver URL"
+  value       = "http://${try(data.kubernetes_service.airflow_webserver.status.0.load_balancer.0.ingress.0.hostname, "pending")}:8080"
+}
+
+output "grafana_url" {
+  description = "Grafana Dashboard URL"
+  value       = "http://${try(data.kubernetes_service.grafana.status.0.load_balancer.0.ingress.0.hostname, "pending")}"
+}
