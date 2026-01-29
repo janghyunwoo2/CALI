@@ -87,6 +87,8 @@ class OpenAIClient:
             
             # ReAct 추론 과정이 있다면 메타데이터에 포함할 수도 있음 (현재는 리턴값에 포함됨)
             
+            # ReAct 추론 과정이 있다면 메타데이터에 포함할 수도 있음 (현재는 리턴값에 포함됨)
+            
             return result
             
         except Exception as e:
