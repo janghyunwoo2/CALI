@@ -119,12 +119,12 @@ class KinesisConsumer:
 
             except ValidationError as e:
                 logger.error(f"데이터 검증 실패: {e}")
-                # DLQ 저장
-                self.dlq.save_failed_record(raw_data, str(e))
+                # DLQ 저장 (User 요청으로 비활성화)
+                # self.dlq.save_failed_record(raw_data, str(e))
                 
             except json.JSONDecodeError as e:
                 logger.error(f"JSON 파싱 실패: {e}")
-                self.dlq.save_failed_record({"raw_bytes": str(record["Data"])}, str(e))
+                # self.dlq.save_failed_record({"raw_bytes": str(record["Data"])}, str(e))
 
             except Exception as e:
                 logger.error(f"레코드 처리 중 알 수 없는 오류: {e}")
@@ -157,20 +157,47 @@ class KinesisConsumer:
                     best_match = top_case
                     logger.info(f"⚡ [Cache Hit] 유사 사례 발견 (Distance: {top_case['score']:.4f}). AI 분석 생략.")
 
+            rag_info = {}
             if best_match:
-                # 캐시된 답변 사용
+                # Cache Hit
                 analysis_result = {
                     "cause": f"[과거 사례 기반 자동 분석] {best_match['cause']}",
                     "action": best_match['action'] 
                 }
+                rag_info = {
+                    "source": "Cache Hit",
+                    "distance": best_match['score'],
+                    "similar_count": len(similar_cases)
+                }
             else:
-                # 3. AI 원인 분석 (OpenAI)
+                # Cache Miss -> AI Analysis
                 if similar_cases:
                     logger.info(f"🔍 유사 사례 {len(similar_cases)}건 발견 (Distance: {similar_cases[0]['score']:.4f}). AI 정밀 분석 수행.")
+                
+                # AI 분석 시간 측정
+                start_time = time.time()
                 analysis_result = self.ai_client.analyze_log(log_record.model_dump(), similar_cases)
+                latency = time.time() - start_time
+                
+                rag_info = {
+                    "source": "OpenAI",
+                    "distance": similar_cases[0]['score'] if similar_cases else None,
+                    "similar_count": len(similar_cases),
+                    "latency": f"{latency:.2f}s"
+                }
+
+                # [RAG 학습용] Cache Miss 발생 시 로그 및 분석 결과 저장
+                # 이걸 모아서 나중에 파인튜닝하거나 지식 베이스에 추가함
+                self.dlq.save_rag_miss_log(log_record.model_dump(), analysis_result)
             
-            # 4. Slack 알림 전송
-            self.slack_notifier.send_alert(log_record.model_dump(), analysis_result)
+            # 3.1 발생 횟수 집계 (Slack 헤더용)
+            rag_info["occurrence_count"] = self.throttle.get_current_count(
+                log_record.service, 
+                log_record.message
+            )
+            
+            # 4. Slack 알림 전송 (RAG 메타데이터 포함)
+            self.slack_notifier.send_alert(log_record.model_dump(), analysis_result, rag_info)
             
             # [삭제됨] 자가 학습 (Auto-Learning) 로직 제거됨 (User Request)
             

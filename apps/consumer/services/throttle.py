@@ -38,3 +38,9 @@ class Throttle:
         else:
             logger.debug(f"🔇 알림 스로틀링 중: {service} (Last {self.window_seconds}s: {current_count} hits)")
             return False
+
+    def get_current_count(self, service: str, message: str) -> int:
+        """현재 윈도우 내 발생 횟수 조회 (조회용, 상태 변경 없음)"""
+        key = (service, message[:100])
+        # 만료된 기록은 should_send_alert 호출 시 정리되므로 여기서는 단순히 길이만 반환
+        return len(self.alert_history.get(key, []))

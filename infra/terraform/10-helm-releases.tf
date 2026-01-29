@@ -100,9 +100,4 @@ resource "helm_release" "grafana" {
   values = [
     file("${path.module}/../helm-values/grafana.yaml")
   ]
-
-  set {
-    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = aws_iam_role.grafana.arn
-  }
 }
