@@ -61,24 +61,22 @@ resource "aws_opensearch_domain" "logs" {
       {
         Effect = "Allow"
         Principal = {
+          AWS = flatten([
+            var.team_members_arns,
+            aws_iam_role.grafana.arn
+          ])
+        }
+        Action   = "es:*"
+        Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
+      },
+      {
+        Effect = "Allow"
+        Principal = {
           AWS = "*"
         }
         Action   = "es:*"
         Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
       },
-      # Grafana 접근 정책 - Helm Grafana 사용으로 주석 처리
-      # Helm Grafana는 OpenSearch에 basicAuth로 직접 접근
-      # {
-      #   Effect = "Allow"
-      #   Principal = {
-      #     AWS = aws_iam_role.grafana.arn
-      #   }
-      #   Action = [
-      #     "es:ESHttpGet",
-      #     "es:ESHttpPost"
-      #   ]
-      #   Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
-      # }
     ]
   })
 
@@ -103,8 +101,10 @@ variable "opensearch_master_password" {
 # Firehose가 접근 거부됨. 이를 해결하기 위해 kubectl로 API 호출 (일회성).
 resource "null_resource" "opensearch_mapping" {
   triggers = {
-    endpoint = aws_opensearch_domain.logs.endpoint
-    role_arn = aws_iam_role.firehose.arn
+    endpoint  = aws_opensearch_domain.logs.endpoint
+    role_arn  = aws_iam_role.firehose.arn
+    team_arns = join(",", var.team_members_arns)
+    timestamp = timestamp() # Force re-run again
   }
 
   provisioner "local-exec" {
@@ -112,18 +112,20 @@ resource "null_resource" "opensearch_mapping" {
     interpreter = ["PowerShell", "-Command"]
 
     # 주의: JSON 내 따옴표(") 이스케이프 처리가 중요함.
-    # Firehose Role을 all_access 그룹에 매핑
+    # Firehose Role 및 팀원들을 all_access 그룹에 매핑
     command = <<EOT
-      $env:Path += ";C:\Program Files\Amazon\AWSCLIV2"; 
-      aws eks update-kubeconfig --name ${var.project_name}-cluster --region ${var.aws_region};
-      kubectl run os-mapping-job --image=curlimages/curl --restart=Never --command -- curl -k -u admin:${var.opensearch_master_password} -X PATCH "https://${aws_opensearch_domain.logs.endpoint}/_plugins/_security/api/rolesmapping/all_access" -H "Content-Type: application/json" -d '[{\"op\": \"add\", \"path\": \"/backend_roles\", \"value\": [\"${aws_iam_role.firehose.arn}\"]}]'
+      kubectl run os-mapping-job --image=curlimages/curl --restart=Never --command -- curl -k -u admin:${var.opensearch_master_password} -X PATCH "https://${aws_opensearch_domain.logs.endpoint}/_plugins/_security/api/rolesmapping/all_access" -H "Content-Type: application/json" -d '[${replace(jsonencode({
+    op    = "replace"
+    path  = "/backend_roles"
+    value = concat([aws_iam_role.firehose.arn], var.team_members_arns)
+}), "\"", "\\\"")}]'
       Start-Sleep -Seconds 10
       kubectl delete pod os-mapping-job
     EOT
-  }
+}
 
-  depends_on = [
-    aws_opensearch_domain.logs,
-    aws_iam_role.firehose
-  ]
+depends_on = [
+  aws_opensearch_domain.logs,
+  aws_iam_role.firehose
+]
 }
