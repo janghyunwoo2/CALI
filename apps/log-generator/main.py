@@ -22,8 +22,7 @@ class CALIIncidentSimulator:
             os.makedirs(self.log_dir)
 
     def get_ts(self):
-        # return datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
     def write_log(self, level, svc, msg):
         ver = self.services[svc]
