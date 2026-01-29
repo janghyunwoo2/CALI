@@ -56,9 +56,3 @@ datasources:
           pplEnabled: false # 초기 설정 안정성을 위해 PPL 비활성화 권장
           # --------------------------------------------------
           sigV4AuthType: "default" # Use IRSA (IAM Roles for Service Accounts)
-
-          # --- [추가] React #130 에러 해결 및 로그 시각화 설정 ---
-          logMessageField: "message" # 전체 객체(_source) 대신 텍스트 메시지 필드 지정
-          logLevelField: "level" # 로그 레벨(INFO, ERROR 등) 필드 지정
-          pplEnabled: false # 초기 설정 안정성을 위해 PPL 비활성화 권장
-          # --------------------------------------------------
