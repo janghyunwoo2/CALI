@@ -168,6 +168,31 @@ class MilvusClient:
             logger.error(f"벡터 검색 중 오류 발생: {e}")
             return []
 
+    
+    def delete_log_case(self, service: str, message: str):
+        """특정 사례 삭제 (서비스+메시지 기준)"""
+        if not self.collection:
+            return
+            
+        try:
+            svc = service.replace("'", "\\'")
+            msg = message.replace("'", "\\'")
+            expr = f"service == '{svc}' && error_message == '{msg}'"
+            
+            self.collection.delete(expr)
+            self.collection.flush()
+            logger.info(f"기존 사례 삭제 완료: {service} - {message}")
+        except Exception as e:
+            logger.error(f"삭제 실패: {e}")
+
+    def upsert_log_case(self, log_data: Dict[str, Any], vector: List[float]):
+        """
+        중복 방지 저장 (Delete -> Insert)
+        동일한 서비스 + 에러 메시지를 가진 데이터가 있으면 삭제 후 재저장.
+        """
+        self.delete_log_case(log_data.get("service"), log_data.get("message"))
+        self.insert_log_case(log_data, vector)
+
     def insert_log_case(self, log_data: Dict[str, Any], vector: List[float]):
         """
         새로운 장애 사례 지식화 (벡터 DB 저장)
@@ -180,11 +205,6 @@ class MilvusClient:
             return
 
         try:
-            # 데이터 준비 (스키마 순서와 무관하게 kwargs로 들어가는게 아니라 리스트로 넣어야 함 usually)
-            # Pymilvus insert takes list of columns (old) or list of dicts (new in recent versions)
-            # Using list of dicts for clearer code if supported, else list of lists.
-            # Milvus 2.x insert accepts: [ [id1, id2], [vec1, vec2], ... ] OR [{...}, {...}] rows
-            
             # 행 단위 데이터 구성
             row = {
                 "vector": vector,

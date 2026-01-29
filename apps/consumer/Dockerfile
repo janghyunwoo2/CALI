@@ -21,4 +21,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "print('healthy')" || exit 1
 
 # 실행
-CMD ["python", "main2.py"]
+CMD ["python", "main.py"]
