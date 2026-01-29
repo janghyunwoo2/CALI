@@ -1,5 +1,6 @@
 from openai import OpenAI
 from config.settings import settings
+from config.prompts import SYSTEM_PROMPT, build_user_prompt
 from utils.logger import setup_logger
 import json
 
@@ -25,30 +26,27 @@ class OpenAIClient:
 
     def analyze_log(self, current_log: dict, similar_cases: list = None) -> dict:
         try:
-            prompt = self._build_rag_prompt(current_log, similar_cases or [])
+            # prompts.py에서 프롬프트 생성
+            prompt = build_user_prompt(current_log, similar_cases or [])
+            
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "당신은 SRE 전문가입니다. 로그를 분석하여 원인과 조치법을 JSON으로 답하세요. 필드: cause, action"},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=0.3 # 사실 기반 응답을 위해 낮춤
             )
-            return json.loads(response.choices[0].message.content)
+            
+            result = json.loads(response.choices[0].message.content)
+            
+            # 응답 포맷 정규화 (action_plan -> action 문자열 변환 등)
+            if "action_plan" in result and isinstance(result["action_plan"], list):
+                result["action"] = "\n".join(result["action_plan"])
+            
+            return result
+            
         except Exception as e:
             logger.error(f"분석 실패: {e}")
-            return {"cause": "분석 엔진 오류", "action": "로그 전문 수동 확인 요망"}
-
-    def _build_rag_prompt(self, current_log: dict, similar_cases: list) -> str:
-        # 지식 베이스가 없을 때는 로그 정보에 집중하도록 구성
-        case_text = f"참고 사례: {similar_cases}" if similar_cases else "참고할 과거 사례 없음."
-        return f"""
-        분석할 로그:
-        - 서비스: {current_log.get('service')}
-        - 에러: {current_log.get('message')}
-        - 상세내용: {current_log.get('log_content')}
-        
-        {case_text}
-        
-        위 내용을 바탕으로 장애 원인(cause)과 운영자가 즉시 취해야 할 조치(action)를 한글로 작성하세요.
-        """
+            return {"cause": "AI Analysis Failed", "action": "Please check raw logs manually."}

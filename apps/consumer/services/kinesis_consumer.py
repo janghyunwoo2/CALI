@@ -21,6 +21,7 @@ from services.s3_dlq import S3DLQ
 from services.slack_notifier import SlackNotifier
 from services.throttle import Throttle
 from utils.logger import setup_logger
+from utils.text_preprocessor import clean_log_for_embedding
 
 logger = setup_logger(__name__)
 
@@ -136,17 +137,37 @@ class KinesisConsumer:
                 return
 
             # 1. 임베딩 생성 (검색용 쿼리)
-            # 로그 메시지와 상세 내용을 조합하여 쿼리 구성
-            query_text = f"{log_record.message} {log_record.log_content or ''}"[:8000]
-            embedding = self.ai_client.create_embedding(query_text)
+            # [RAG 최적화] 텍스트 전처리 적용 (노이즈 제거)
+            clean_query = clean_log_for_embedding(
+                log_record.service, 
+                log_record.message, 
+                log_record.log_content
+            )
+            embedding = self.ai_client.create_embedding(clean_query)
             
             # 2. 유사 사례 검색 (Milvus)
             similar_cases = self.milvus_client.search_similar_logs(embedding)
-            if similar_cases:
-                logger.info(f"🔍 유사 사례 {len(similar_cases)}건 발견")
             
-            # 3. AI 원인 분석 (OpenAI)
-            analysis_result = self.ai_client.analyze_log(log_record.model_dump(), similar_cases)
+            # [RAG 최적화] 유사도가 매우 높은(거리 가까운) 사례가 있으면 AI 호출 생략
+            # L2 Distance metric: 0에 가까울수록 유사함 (임계값: 0.35 설정)
+            best_match = None
+            if similar_cases:
+                top_case = similar_cases[0]
+                if top_case.get('score') < 0.35:
+                    best_match = top_case
+                    logger.info(f"⚡ [Cache Hit] 유사 사례 발견 (Distance: {top_case['score']:.4f}). AI 분석 생략.")
+
+            if best_match:
+                # 캐시된 답변 사용
+                analysis_result = {
+                    "cause": f"[과거 사례 기반 자동 분석] {best_match['cause']}",
+                    "action": best_match['action'] 
+                }
+            else:
+                # 3. AI 원인 분석 (OpenAI)
+                if similar_cases:
+                    logger.info(f"🔍 유사 사례 {len(similar_cases)}건 발견 (Distance: {similar_cases[0]['score']:.4f}). AI 정밀 분석 수행.")
+                analysis_result = self.ai_client.analyze_log(log_record.model_dump(), similar_cases)
             
             # 4. Slack 알림 전송
             self.slack_notifier.send_alert(log_record.model_dump(), analysis_result)
