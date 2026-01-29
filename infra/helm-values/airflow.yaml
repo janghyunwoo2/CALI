@@ -27,6 +27,6 @@ dags:
   gitSync:
     enabled: true
     repo: https://github.com/janghyunwoo2/CALI.git
-    branch: main
+    branch: feat/t4/airflow
     subPath: dags
     wait: 60

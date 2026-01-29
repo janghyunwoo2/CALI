@@ -272,3 +272,31 @@ resource "aws_iam_role_policy_attachment" "cluster_autoscaler" {
   policy_arn = aws_iam_policy.cluster_autoscaler.arn
   role       = aws_iam_role.cluster_autoscaler.name
 }
+
+# ------------------------------------------------------------------------------
+# Grafana Role (IRSA)
+# ------------------------------------------------------------------------------
+resource "aws_iam_role" "grafana" {
+  name = "${var.project_name}-grafana-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.eks.arn
+      }
+      Condition = {
+        StringEquals = {
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:monitoring:grafana"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "grafana_opensearch" {
+  policy_arn = aws_iam_policy.firehose_opensearch.arn # Reusing OpenSearch access policy
+  role       = aws_iam_role.grafana.name
+}
