@@ -95,6 +95,18 @@ variable "opensearch_master_password" {
 }
 
 # ------------------------------------------------------------------------------
+# OpenSearch Index Template Management (Managed by Terraform Provider)
+# ------------------------------------------------------------------------------
+resource "opensearch_index_template" "logs" {
+  name = "cali-logs-template"
+  body = file("${path.module}/opensearch_template.json")
+
+  depends_on = [
+    aws_opensearch_domain.logs
+  ]
+}
+
+# ------------------------------------------------------------------------------
 # OpenSearch 권한 매핑 자동화 (FGAC)
 # ------------------------------------------------------------------------------
 # Terraform 생성 만으로는 내부 DB(Security Plugin)에 IAM Role이 매핑되지 않아
@@ -104,7 +116,7 @@ resource "null_resource" "opensearch_mapping" {
     endpoint  = aws_opensearch_domain.logs.endpoint
     role_arn  = aws_iam_role.firehose.arn
     team_arns = join(",", var.team_members_arns)
-    timestamp = timestamp() # Force re-run again
+    timestamp = timestamp() # Force re-run for Grafana access
   }
 
   provisioner "local-exec" {
@@ -117,7 +129,7 @@ resource "null_resource" "opensearch_mapping" {
       kubectl run os-mapping-job --image=curlimages/curl --restart=Never --command -- curl -k -u admin:${var.opensearch_master_password} -X PATCH "https://${aws_opensearch_domain.logs.endpoint}/_plugins/_security/api/rolesmapping/all_access" -H "Content-Type: application/json" -d '[${replace(jsonencode({
     op    = "replace"
     path  = "/backend_roles"
-    value = concat([aws_iam_role.firehose.arn], var.team_members_arns)
+    value = concat([aws_iam_role.firehose.arn, aws_iam_role.grafana.arn], var.team_members_arns)
 }), "\"", "\\\"")}]'
       Start-Sleep -Seconds 10
       kubectl delete pod os-mapping-job
@@ -126,6 +138,7 @@ resource "null_resource" "opensearch_mapping" {
 
 depends_on = [
   aws_opensearch_domain.logs,
-  aws_iam_role.firehose
+  aws_iam_role.firehose,
+  aws_iam_role.grafana
 ]
 }
