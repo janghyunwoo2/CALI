@@ -20,6 +20,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
     }
+    opensearch = {
+      source  = "opensearch-project/opensearch"
+      version = "2.2.0"
+    }
   }
 }
 
@@ -63,6 +67,14 @@ provider "helm" {
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.cluster.certificate_authority[0].data)
     token                  = data.aws_eks_cluster_auth.cluster.token
   }
+}
+
+provider "opensearch" {
+  url               = "https://${aws_opensearch_domain.logs.endpoint}"
+  username          = "admin"
+  password          = var.opensearch_master_password
+  healthcheck       = false
+  sign_aws_requests = false
 }
 
 # ------------------------------------------------------------------------------

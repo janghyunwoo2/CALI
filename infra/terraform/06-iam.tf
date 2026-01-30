@@ -300,3 +300,66 @@ resource "aws_iam_role_policy_attachment" "grafana_opensearch" {
   policy_arn = aws_iam_policy.firehose_opensearch.arn # Reusing OpenSearch access policy
   role       = aws_iam_role.grafana.name
 }
+
+# ------------------------------------------------------------------------------
+# Airflow Role (IRSA)
+# ------------------------------------------------------------------------------
+resource "aws_iam_role" "airflow_role" {
+  name = "${var.project_name}-airflow-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.eks.arn
+      }
+      Condition = {
+        StringEquals = {
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:airflow:airflow-sa"
+        }
+      }
+    }]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Workload S3 Access Policy (Airflow, Consumer용)
+# ------------------------------------------------------------------------------
+# Firehose용 정책과 별도로 관리하여 Workload(Pod) 전용 권한 정의
+resource "aws_iam_policy" "workload_s3_access" {
+  name        = "${var.project_name}-workload-s3-access"
+  description = "S3 Bucket Read/Write and List Permissions for Workloads"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl",
+          "s3:GetObject",
+          "s3:GetBucketLocation",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.logs.arn,
+          "${aws_s3_bucket.logs.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "airflow_s3_access" {
+  policy_arn = aws_iam_policy.workload_s3_access.arn
+  role       = aws_iam_role.airflow_role.name
+}
+
+# Consumer Role에도 Workload S3 권한 추가 (기존 ReadOnly 대체/보완)
+resource "aws_iam_role_policy_attachment" "app_s3_access" {
+  policy_arn = aws_iam_policy.workload_s3_access.arn
+  role       = aws_iam_role.app_role.name
+}

@@ -1,0 +1,23 @@
+{
+  "index_patterns": [
+    "cali-logs-*"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "timestamp": {
+          "type": "date"
+        },
+        "level": {
+          "type": "keyword"
+        },
+        "service": {
+          "type": "keyword"
+        },
+        "message": {
+          "type": "text"
+        }
+      }
+    }
+  }
+}
