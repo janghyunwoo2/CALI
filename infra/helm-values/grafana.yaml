@@ -1,10 +1,11 @@
-# Grafana Helm Values (Optimized for OpenSearch Logging)
+# Grafana Helm Values (Clean Standard Configuration)
 adminPassword: "admin"
 
 image:
   tag: "latest"
 
 # 1. Official Plugin Installation
+# Helm 차트가 시작 시 이 플러그인들을 자동으로 다운로드 및 설치합니다.
 plugins:
   - grafana-opensearch-datasource
 
@@ -19,12 +20,14 @@ persistence:
     - kubernetes.io/pvc-protection
 
 # 3. Security Context (Crucial for EBS)
+# EBS 볼륨에 대한 쓰기 권한을 보장하기 위해 fsGroup을 설정합니다.
 securityContext:
   runAsUser: 472
   runAsGroup: 472
   fsGroup: 472
 
 # 4. Deployment Strategy
+# RWO(EBS) 볼륨 충돌 방지를 위해 기존 Pod 종료 후 새 Pod 생성
 deploymentStrategy:
   type: Recreate
 
@@ -41,7 +44,10 @@ datasources:
         type: grafana-opensearch-datasource
         url: https://search-cali-logs-brzk65m2qt5mktujvcaz3inde4.ap-northeast-2.es.amazonaws.com
         access: proxy
-        basicAuth: false
+        basicAuth: true
+        basicAuthUser: admin
+        secureJsonData:
+          basicAuthPassword: "ChangeMe123!"
         isDefault: true
         jsonData:
           # 인덱스 필드명과 일치화

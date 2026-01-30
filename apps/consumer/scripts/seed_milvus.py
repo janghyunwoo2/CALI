@@ -18,8 +18,8 @@ from utils.text_preprocessor import clean_log_for_embedding
 logger = setup_logger(__name__)
 
 KB_DIR = "knowledge_base"
-CHUNK_SIZE = 1000  # 청킹 기준 (글자 수)
-CHUNK_OVERLAP = 200  # 중복 허용 범위
+CHUNK_SIZE = 500  # 청킹 기준 (글자 수)
+CHUNK_OVERLAP = 100  # 중복 허용 범위
 
 def chunk_text(text: str, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     """
@@ -56,37 +56,95 @@ def chunk_text(text: str, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
         
     return chunks
 
-def parse_markdown_kb(file_path):
-    """MD 파일 파싱 (Frontmatter + Sections)"""
-    with open(file_path, "r", encoding="utf-8") as f:
-        post = frontmatter.load(f)
-        
-    content = post.content
-    metadata = post.metadata
-    
-    # 간단한 섹션 파싱 (## Root Cause, ## Action Items 기준)
+def parse_markdown_kb_multi(file_path):
+    """MD 파일 파싱 (다중 케이스 지원)"""
+    cases = []
     try:
-        parts = content.split("## Root Cause")
-        summary_part = parts[0].replace("## Incident Summary", "").strip()
+        with open(file_path, "r", encoding="utf-8") as f:
+            full_text = f.read()
+
+        # 정규표현식으로 각 항목 분리 (## 번호. 제목 패턴)
+        # 예: ## 01. Title ... (다음 ## 번호 전까지)
+        import re
+        pattern = re.compile(r"## \d+\..+?(?=## \d+\.|$)", re.DOTALL)
+        sections = pattern.findall(full_text)
         
-        remaining = parts[1]
-        
-        # Action Items 섹션이 없는 경우 대비
-        if "## Action Items" in remaining:
-            cause_part, action_part = remaining.split("## Action Items")
-        else:
-            cause_part = remaining
-            action_part = "참고: Action Items 섹션이 없습니다."
-        
-        return {
-            "service": metadata.get("service", "unknown"),
-            "message": metadata.get("error_message", "unknown error"),
-            "log_content": summary_part.strip(),
-            "cause": cause_part.strip(),
-            "action": action_part.strip()
-        }
+        if not sections:
+            # 기존 단일 포맷 지원 (백워드 호환)
+            single_case = parse_markdown_kb_legacy(file_path)
+            if single_case: cases.append(single_case)
+            return cases
+
+        for section in sections:
+            try:
+                # YAML 파싱 (--- ... ---)
+                yaml_match = re.search(r"---\n(.+?)\n---", section, re.DOTALL)
+                if not yaml_match:
+                    continue
+                
+                yaml_text = yaml_match.group(1)
+                import yaml
+                metadata = yaml.safe_load(yaml_text)
+                
+                # 본문 파싱
+                body_text = section.replace(yaml_match.group(0), "")
+                
+                # 간단한 섹션 파싱
+                summary = ""
+                cause = "분석 중..."
+                action = "내용 없음"
+                
+                parts = body_text.split("### Root Cause")
+                if len(parts) > 1:
+                    summary = parts[0].replace("### Incident Summary", "").strip()
+                    remaining = parts[1]
+                    if "### Action Items" in remaining:
+                        c, a = remaining.split("### Action Items")
+                        cause = c.strip()
+                        action = a.strip()
+                    else:
+                        cause = remaining.strip()
+                
+                cases.append({
+                    "service": metadata.get("service", "unknown"),
+                    "message": metadata.get("error_message", "unknown error"),
+                    "log_content": summary,
+                    "cause": cause,
+                    "action": action
+                })
+            except Exception as e:
+                logger.warning(f"섹션 파싱 실패: {e}")
+                continue
+
     except Exception as e:
-        logger.warning(f"파일 파싱 실패 ({file_path}): 형식이 맞지 않습니다. {e}")
+        logger.warning(f"파일 파싱 실패 ({file_path}): {e}")
+    
+    return cases
+
+def parse_markdown_kb_legacy(file_path):
+    """기존 단일 파일 파싱 (백업용)"""
+    try:
+        import frontmatter
+        with open(file_path, "r", encoding="utf-8") as f:
+            post = frontmatter.load(f)
+        parts = post.content.split("## Root Cause")
+        summary = parts[0].replace("## Incident Summary", "").strip()
+        remaining = parts[1]
+        if "### Action Items" in remaining:
+            c, a = remaining.split("### Action Items")
+            cause = c.strip()
+            action = a.strip()
+        else:
+            cause = remaining.strip()
+            action = "내용 없음"
+        return {
+            "service": post.metadata.get("service", "unknown"),
+            "message": post.metadata.get("error_message", "unknown error"),
+            "log_content": summary,
+            "cause": cause,
+            "action": action
+        }
+    except:
         return None
 
 def seed_milvus():
@@ -95,57 +153,53 @@ def seed_milvus():
     milvus_client = MilvusClient()
     ai_client = OpenAIClient()
     
-    # 지식 베이스 폴더 내의 모든 .md 파일 로드
     md_files = glob.glob(os.path.join(KB_DIR, "*.md"))
-    if not md_files:
-        print(f"⚠️ '{KB_DIR}' 폴더에 .md 파일이 없습니다.")
-        return
-
     success_count = 0
     
     for file_path in md_files:
-        case = parse_markdown_kb(file_path)
-        if not case:
+        print(f"Processing File: {os.path.basename(file_path)}...")
+        cases = parse_markdown_kb_multi(file_path)
+        
+        if not cases:
+            print(f"   -> No cases found in {file_path}")
             continue
-            
-        try:
-            print(f"Processing: {os.path.basename(file_path)}...")
-            
-            # 1. 텍스트 전처리 (노이즈 제거)
-            clean_text = clean_log_for_embedding(
-                case['service'], 
-                case['message'], 
-                case['log_content']
-            )
-            # 검색 정확도를 위해 cause/action도 임베딩 텍스트에 포함
-            full_context = f"{clean_text} \nCause: {case['cause']} \nAction: {case['action']}"
-            
-            # 2. 청킹 (Chunking) - 문맥 단위 분할
-            chunks = chunk_text(full_context)
-            if len(chunks) > 1:
-                print(f"   -> 텍스트 길이가 길어 {len(chunks)}개 청크로 분할합니다.")
-            
-            # 3. 기존 데이터 삭제 (Upsert 전처리)
-            # 청크가 여러 개일 수 있으므로, 먼저 해당 케이스의 데이터를 모두 지움
-            milvus_client.delete_log_case(case['service'], case['message'])
-            
-            # 4. 청크별 임베딩 및 저장
-            for i, chunk in enumerate(chunks):
-                vector = ai_client.create_embedding(chunk)
+
+        print(f"   -> Found {len(cases)} cases.")
+        
+        for case in cases:
+            try:
+                # 1. 텍스트 전처리
+                clean_text = clean_log_for_embedding(
+                    case['service'], 
+                    case['message'], 
+                    case['log_content']
+                )
+                full_context = f"{clean_text} \nCause: {case['cause']} \nAction: {case['action']}"
                 
-                if not vector:
-                    print(f"❌ 임베딩 실패 (Chunk {i}): {case['message']}")
-                    continue
+                # 2. 청킹
+                chunks = chunk_text(full_context)
                 
-                # 메타데이터는 원본 유지 (검색되면 전체 Action을 보여주기 위함)
-                # 단, 디버깅을 위해 로그에는 청크 인덱스 표시
-                milvus_client.insert_log_case(case, vector)
+                # 3. 기존 데이터 삭제 (Upsert)
+                # 대량 처리를 위해 flush=False 설정
+                milvus_client.delete_log_case(case['service'], case['message'], flush=False)
                 
-            print(f"✅ 저장 완료 ({len(chunks)} chunks): {case['service']} - {case['message']}")
-            success_count += 1
-            
-        except Exception as e:
-            print(f"❌ 저장 실패 ({file_path}): {e}")
+                # 4. 저장
+                for i, chunk in enumerate(chunks):
+                    vector = ai_client.create_embedding(chunk)
+                    if vector:
+                        milvus_client.insert_log_case(case, vector, flush=False)
+                
+                success_count += 1
+                if success_count % 50 == 0:
+                    print(f"   ... Processed {success_count} cases so far (Flushing...)")
+                    milvus_client.flush_collection()
+                    
+            except Exception as e:
+                print(f"❌ Case Error: {e}")
+
+    # 최종 Flush
+    milvus_client.flush_collection()
+    print(f"=== 초기화 완료 (Total: {success_count}건) ===")
 
     print(f"=== 초기화 완료 (Total: {success_count}건) ===")
 
