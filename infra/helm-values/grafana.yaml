@@ -1,6 +1,9 @@
 # Grafana Helm Values (Optimized for OpenSearch Logging)
 adminPassword: "admin"
 
+image:
+  tag: "latest"
+
 # 1. Official Plugin Installation
 plugins:
   - grafana-opensearch-datasource
@@ -34,26 +37,26 @@ datasources:
   datasources.yaml:
     apiVersion: 1
     datasources:
-      - name: OpenSearch2
+      - name: OpenSearch
         type: grafana-opensearch-datasource
         url: https://search-cali-logs-brzk65m2qt5mktujvcaz3inde4.ap-northeast-2.es.amazonaws.com
         access: proxy
         basicAuth: false
         isDefault: true
         jsonData:
-          # [수정] @timestamp 대신 실제 인덱스의 필드명인 timestamp 사용
+          # 인덱스 필드명과 일치화
           timeField: "timestamp"
           version: "2.11.0"
           flavor: "opensearch"
-          # [확인] 인덱스 패턴 뒤에 별표(*)가 포함되어야 합니다.
           database: "cali-logs*"
+
+          # 인증 설정 (IRSA 사용)
           sigV4Auth: true
+          sigV4AuthType: "default"
           sigV4Region: "ap-northeast-2"
 
-          # --- [추가] React #130 에러 해결 및 로그 시각화 설정 ---
-          logMessageField: "message" # 전체 객체(_source) 대신 텍스트 메시지 필드 지정
-          logLevelField: "level" # 로그 레벨(INFO, ERROR 등) 필드 지정
-          pplEnabled: false # 초기 설정 안정성을 위해 PPL 비활성화 권장
-          # --------------------------------------------------
-          sigV4AuthType: "default" # Use IRSA (IAM Roles for Service Accounts)
-          includeFrozen: false
+          # --- 로그 시각화 및 에러 방지 핵심 설정 ---
+          logMessageField: "message" # [필수] _source 덩어리 대신 텍스트만 출력
+          logLevelField: "level" # [필수] 로그 레벨 표시
+          pplEnabled: false # [중요] React 에러 방지를 위해 PPL 비활성화
+          includeFrozen: false # [추가] 검색 성능 최적화 및 에러 방지
