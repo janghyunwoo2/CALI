@@ -51,7 +51,7 @@ resource "kubernetes_deployment" "consumer" {
           }
           env {
             name  = "MILVUS_HOST"
-            value = "milvus.milvus.svc.cluster.local" # Full DNS for cross-namespace
+            value = "milvus-standalone.milvus.svc.cluster.local" # Full DNS for cross-namespace
           }
           env {
             name  = "MILVUS_PORT"

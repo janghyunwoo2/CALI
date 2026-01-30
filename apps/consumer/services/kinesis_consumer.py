@@ -49,11 +49,11 @@ class KinesisConsumer:
         logger.info(f"🚀 Kinesis Consumer 시작: {self.stream_name}")
         
         try:
-            # 1. 샤드 목록 가져오기 (단일 샤드 가정, multi-shard시 로직 확장 필요)
+            # 1. 샤드 목록 가져오기 (단일 샤드 가정)
             response = self.kinesis_client.describe_stream(StreamName=self.stream_name)
             shard_id = response['StreamDescription']['Shards'][0]['ShardId']
             
-            # 2. 샤드 이터레이터 생성 (LATEST: 실행 시점 이후 데이터만)
+            # 2. 샤드 이터레이터 생성 (LATEST)
             self.shard_iterator = self.kinesis_client.get_shard_iterator(
                 StreamName=self.stream_name,
                 ShardId=shard_id,
@@ -62,9 +62,16 @@ class KinesisConsumer:
             
             # 3. 폴링 루프
             while True:
+                # [Aggregation] 요약 알림 전송 (매 루프마다 체크)
+                summaries = self.throttle.get_summaries_to_send()
+                for s in summaries:
+                    self.slack_notifier.send_summary_alert(
+                        s['service'], s['message'], s['count'], s['duration']
+                    )
+
                 response = self.kinesis_client.get_records(
                     ShardIterator=self.shard_iterator,
-                    Limit=10  # 배치 사이즈
+                    Limit=10
                 )
                 
                 records = response.get('Records', [])
@@ -89,27 +96,19 @@ class KinesisConsumer:
         """레코드 배치 처리"""
         for record in records:
             try:
-                # 1. Kinesis 데이터 디코딩 및 전처리
+                # 1. Kinesis 데이터 디코딩
                 raw_str = record["Data"].decode("utf-8")
                 
-                # [DATA received from shardId...] 접두어 제거
                 if "[DATA received from" in raw_str:
                     try:
-                        # 접두어 뒤의 실제 JSON 부분만 추출
-                        # 예: "[DATA...] {"level":...}" -> "{"level":...}"
                         raw_str = raw_str.split("]: ", 1)[1]
                     except IndexError:
                         logger.warning(f"메타데이터 제거 실패, 원본 사용: {raw_str[:50]}...")
 
                 raw_data = json.loads(raw_str)
-
-                # 2. Pydantic 검증
                 log_record = LogRecord(**raw_data)
 
-                # 3. 레벨 필터링 (ERROR/WARN만 처리)
                 if log_record.level not in ["ERROR", "WARN"]:
-                    # INFO 로그는 디버그 모드에서만 출력
-                    # logger.debug(f"ℹ️ INFO 스킵: {log_record.service}")
                     continue
 
                 logger.info(f"🚨 에러 감지: {log_record.service} - {log_record.message}")
@@ -119,25 +118,19 @@ class KinesisConsumer:
 
             except ValidationError as e:
                 logger.error(f"데이터 검증 실패: {e}")
-                # DLQ 저장
-                self.dlq.save_failed_record(raw_data, str(e))
-                
             except json.JSONDecodeError as e:
                 logger.error(f"JSON 파싱 실패: {e}")
-                self.dlq.save_failed_record({"raw_bytes": str(record["Data"])}, str(e))
-
             except Exception as e:
                 logger.error(f"레코드 처리 중 알 수 없는 오류: {e}")
 
     def _run_rag_pipeline(self, log_record: LogRecord):
         """RAG 분석 및 알림 파이프라인"""
         try:
-            # 0. 스로틀링 체크 (과도한 알림 방지)
-            if not self.throttle.should_send_alert(log_record.service, log_record.message):
+            # 0. 스로틀링 체크 (First Alert 여부 판단)
+            if not self.throttle.record_occurrence(log_record.service, log_record.message):
                 return
 
-            # 1. 임베딩 생성 (검색용 쿼리)
-            # [RAG 최적화] 텍스트 전처리 적용 (노이즈 제거)
+            # 1. 임베딩 생성
             clean_query = clean_log_for_embedding(
                 log_record.service, 
                 log_record.message, 
@@ -145,34 +138,50 @@ class KinesisConsumer:
             )
             embedding = self.ai_client.create_embedding(clean_query)
             
-            # 2. 유사 사례 검색 (Milvus)
+            # 2. 유사 사례 검색
             similar_cases = self.milvus_client.search_similar_logs(embedding)
             
-            # [RAG 최적화] 유사도가 매우 높은(거리 가까운) 사례가 있으면 AI 호출 생략
-            # L2 Distance metric: 0에 가까울수록 유사함 (임계값: 0.35 설정)
+            # Cache Hit 로직
             best_match = None
             if similar_cases:
                 top_case = similar_cases[0]
                 if top_case.get('score') < 0.35:
                     best_match = top_case
-                    logger.info(f"⚡ [Cache Hit] 유사 사례 발견 (Distance: {top_case['score']:.4f}). AI 분석 생략.")
+                    logger.info(f"⚡ [Cache Hit] 유사 사례 발견 (Distance: {top_case['score']:.4f})")
 
+            rag_info = {}
             if best_match:
-                # 캐시된 답변 사용
                 analysis_result = {
                     "cause": f"[과거 사례 기반 자동 분석] {best_match['cause']}",
                     "action": best_match['action'] 
                 }
+                rag_info = {
+                    "source": "Cache Hit",
+                    "distance": best_match['score'],
+                    "similar_count": len(similar_cases)
+                }
             else:
-                # 3. AI 원인 분석 (OpenAI)
                 if similar_cases:
-                    logger.info(f"🔍 유사 사례 {len(similar_cases)}건 발견 (Distance: {similar_cases[0]['score']:.4f}). AI 정밀 분석 수행.")
+                    logger.info(f"🔍 유사 사례 {len(similar_cases)}건 발견. AI 정밀 분석 수행.")
+                
+                start_time = time.time()
                 analysis_result = self.ai_client.analyze_log(log_record.model_dump(), similar_cases)
+                latency = time.time() - start_time
+                
+                rag_info = {
+                    "source": "OpenAI",
+                    "distance": similar_cases[0]['score'] if similar_cases else None,
+                    "similar_count": len(similar_cases),
+                    "latency": f"{latency:.2f}s"
+                }
+
+                self.dlq.save_rag_miss_log(log_record.model_dump(), analysis_result)
+            
+            # 3. 발생 횟수 (이 시점엔 무조건 1회차 First Alert임)
+            rag_info["occurrence_count"] = 1
             
             # 4. Slack 알림 전송
-            self.slack_notifier.send_alert(log_record.model_dump(), analysis_result)
-            
-            # [삭제됨] 자가 학습 (Auto-Learning) 로직 제거됨 (User Request)
+            self.slack_notifier.send_alert(log_record.model_dump(), analysis_result, rag_info)
             
         except Exception as e:
             logger.error(f"RAG 파이프라인 처리 실패: {e}")

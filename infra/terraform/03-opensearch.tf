@@ -61,22 +61,24 @@ resource "aws_opensearch_domain" "logs" {
       {
         Effect = "Allow"
         Principal = {
-          AWS = flatten([
-            var.team_members_arns,
-            aws_iam_role.grafana.arn
-          ])
-        }
-        Action   = "es:*"
-        Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
-      },
-      {
-        Effect = "Allow"
-        Principal = {
           AWS = "*"
         }
         Action   = "es:*"
         Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
       },
+      # Grafana 접근 정책 - Helm Grafana 사용으로 주석 처리
+      # Helm Grafana는 OpenSearch에 basicAuth로 직접 접근
+      # {
+      #   Effect = "Allow"
+      #   Principal = {
+      #     AWS = aws_iam_role.grafana.arn
+      #   }
+      #   Action = [
+      #     "es:ESHttpGet",
+      #     "es:ESHttpPost"
+      #   ]
+      #   Resource = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-logs/*"
+      # }
     ]
   })
 
@@ -124,7 +126,7 @@ resource "null_resource" "opensearch_mapping" {
     interpreter = ["PowerShell", "-Command"]
 
     # 주의: JSON 내 따옴표(") 이스케이프 처리가 중요함.
-    # Firehose Role 및 팀원들을 all_access 그룹에 매핑
+    # Firehose Role을 all_access 그룹에 매핑
     command = <<EOT
       kubectl run os-mapping-job --image=curlimages/curl --restart=Never --command -- curl -k -u admin:${var.opensearch_master_password} -X PATCH "https://${aws_opensearch_domain.logs.endpoint}/_plugins/_security/api/rolesmapping/all_access" -H "Content-Type: application/json" -d '[${replace(jsonencode({
     op    = "replace"
@@ -134,7 +136,7 @@ resource "null_resource" "opensearch_mapping" {
       Start-Sleep -Seconds 10
       kubectl delete pod os-mapping-job
     EOT
-}
+  }
 
 depends_on = [
   aws_opensearch_domain.logs,

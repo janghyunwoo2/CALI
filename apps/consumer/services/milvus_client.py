@@ -169,7 +169,14 @@ class MilvusClient:
             return []
 
     
-    def delete_log_case(self, service: str, message: str):
+    
+    def flush_collection(self):
+        """데이터 영구 저장 (Flush)"""
+        if self.collection:
+            self.collection.flush()
+            logger.info("Milvus Collection Flushed.")
+
+    def delete_log_case(self, service: str, message: str, flush: bool = True):
         """특정 사례 삭제 (서비스+메시지 기준)"""
         if not self.collection:
             return
@@ -180,26 +187,28 @@ class MilvusClient:
             expr = f"service == '{svc}' && error_message == '{msg}'"
             
             self.collection.delete(expr)
-            self.collection.flush()
+            if flush:
+                self.collection.flush()
             logger.info(f"기존 사례 삭제 완료: {service} - {message}")
         except Exception as e:
             logger.error(f"삭제 실패: {e}")
 
-    def upsert_log_case(self, log_data: Dict[str, Any], vector: List[float]):
+    def upsert_log_case(self, log_data: Dict[str, Any], vector: List[float], flush: bool = True):
         """
         중복 방지 저장 (Delete -> Insert)
         동일한 서비스 + 에러 메시지를 가진 데이터가 있으면 삭제 후 재저장.
         """
-        self.delete_log_case(log_data.get("service"), log_data.get("message"))
-        self.insert_log_case(log_data, vector)
+        self.delete_log_case(log_data.get("service"), log_data.get("message"), flush=False)
+        self.insert_log_case(log_data, vector, flush=flush)
 
-    def insert_log_case(self, log_data: Dict[str, Any], vector: List[float]):
+    def insert_log_case(self, log_data: Dict[str, Any], vector: List[float], flush: bool = True):
         """
         새로운 장애 사례 지식화 (벡터 DB 저장)
 
         Args:
             log_data (Dict): {service, error_message, cause, action} 포함
             vector (List[float]): 임베딩 벡터
+            flush (bool): 즉시 Flush 여부 (대량 Insert 시 False 권장)
         """
         if not self.collection:
             return
@@ -215,7 +224,8 @@ class MilvusClient:
             }
 
             self.collection.insert([row])
-            self.collection.flush()  # 바로 반영
+            if flush:
+                self.collection.flush()  # 바로 반영
             logger.info(f"신규 사례 저장 완료: {row['service']} - {row['error_message'][:30]}...")
 
         except Exception as e:
