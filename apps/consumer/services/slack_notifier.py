@@ -4,11 +4,7 @@ from datetime import datetime
 
 from config.settings import settings
 # MVP 단계에서 Throttler가 미구현 상태라면 아래 줄을 주석 처리하거나 빈 클래스로 대체하세요.
-try:
-    from utils.throttle import Throttler
-except ImportError:
-    class Throttler:
-        def should_send_alert(self, key): return True
+from services.throttle import Throttle
 
 from utils.logger import setup_logger
 
@@ -22,11 +18,62 @@ class SlackNotifier:
         self.webhook_url = settings.SLACK_WEBHOOK_URL
         # 설정값이 없을 경우를 대비한 기본값 처리
         window = getattr(settings, 'THROTTLE_WINDOW_SECONDS', 60)
-        max_alerts = getattr(settings, 'THROTTLE_MAX_ALERTS', 5)
+        # max_alerts = getattr(settings, 'THROTTLE_MAX_ALERTS', 5) # Not used
         
-        self.throttler = Throttler(window_seconds=window, max_alerts=max_alerts)
+        # [Fix] Throttle 클래스 사용 (기존 Throttler -> Throttle)
+        self.throttler = Throttle()
         logger.info("Slack Notifier 초기화 완료")
     
+    def send_summary_alert(
+        self, 
+        service: str, 
+        message_sig: str, 
+        count: int, 
+        duration: int
+    ) -> bool:
+        """요약 알림 전송 (집계된 추가 발생 알림)"""
+        try:
+            alert_key = f"{service}_{message_sig}"
+            
+            # 요약 메시지 구성
+            slack_msg = {
+                "text": f"📊 장애 알림 요약: {service}",
+                "attachments": [
+                    {
+                        "color": "#808080",  # Gray
+                        "blocks": [
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn", 
+                                    "text": f"📊 *추가 발생 알림 (Aggregation)*\n지난 {duration}초간 동일한 에러가 *총 {count}건* 더 발생했습니다."
+                                }
+                            },
+                            {
+                                "type": "context",
+                                "elements": [
+                                    {"type": "mrkdwn", "text": f"*Service:* {service}"},
+                                    {"type": "mrkdwn", "text": f"*Error:* {message_sig}..."}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            
+            response = requests.post(
+                self.webhook_url,
+                json=slack_msg,
+                timeout=5
+            )
+            response.raise_for_status()
+            logger.info(f"Slack 요약 알림 전송 성공: {alert_key} (Count: {count})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Slack 요약 알림 전송 실패: {e}")
+            return False
+
     def send_alert(
         self, 
         log_data: Dict[str, Any], 
@@ -35,11 +82,9 @@ class SlackNotifier:
     ) -> bool:
         """장애 알림 전송 (AI 분석 결과 + RAG 정보 포함)"""
         
-        # 1. Throttling 체크 (서비스명과 에러코드로 중복 필터링)
-        alert_key = f"{log_data.get('service')}_{log_data.get('error_code', 'NO_CODE')}"
-        if not self.throttler.should_send_alert(alert_key):
-            logger.info(f"Throttling 활성화: 알림 전송 건너뜀 - {alert_key}")
-            return False
+        # NOTE: Throttling 체크는 이제 외부(KinesisConsumer)에서 Throttle.record_occurrence()로 수행함.
+        # 따라서 여기서는 무조건 보낸다고 가정하지만, 호환성을 위해 남겨둡니다.
+        # 만약 KinesisConsumer가 아닌 곳에서 호출한다면 여기서 체크해야 할 수도 있음.
         
         try:
             # 2. Slack 메시지 구성
@@ -55,7 +100,7 @@ class SlackNotifier:
             )
             response.raise_for_status()
             
-            logger.info(f"Slack 알림 전송 성공: {alert_key}")
+            logger.info(f"Slack 알림 전송 성공: {log_data.get('service')}")
             return True
             
         except Exception as e:

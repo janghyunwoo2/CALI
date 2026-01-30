@@ -16,63 +16,63 @@ RAG 프롬프트 템플릿 정의
 # FEW-SHOT EXAMPLES (지식 베이스)
 # =====================================================
 FEW_SHOT_EXAMPLES = """
-[예시 1: DB Connection Pool 고갈]
+[예시 1: DB Connection Pool Exhaustion]
+입력:
+- Service: common-db
+- Error: remaining connection slots are reserved
+- Level: ERROR
+
+출력:
+{
+    "thought_process": "1. 분석: 'remaining connection slots are reserved' 에러는 PostgreSQL의 최대 허용 커넥션 수를 초과했을 때 발생합니다.\n2. 가설: 특정 서비스에서 커넥션을 반환(Close)하지 않고 계속 점유하고 있거나, 트래픽 급증으로 풀 사이즈가 부족한 상황입니다.\n3. 검증: pg_stat_activity 뷰를 확인하여 활성 커넥션 수와 대기 상태를 파악해야 합니다.",
+    "cause": [
+        "PostgreSQL Connection Pool Exhausted (DB 커넥션 풀 고갈)",
+        "Connection Leak due to Unclosed Resources (커넥션 반환 누락으로 인한 자원 고갈)"
+    ],
+    "action_plan": [
+        "진단\\nSELECT count(*) FROM pg_stat_activity;\\n(설명: 현재 활성화된 커넥션 개수 확인)", 
+        "조치\\nkubectl edit configmap postgres-config\\n(설명: max_connections 값을 상향 조정하거나, 애플리케이션의 커넥션 풀 설정을 최적화)",
+        "검증\\n\\n(설명: 커넥션 수가 안정적으로 유지되는지 모니터링)"
+    ]
+}
+
+[예시 2: Pod OOMKilled]
 입력:
 - Service: payment-api
-- Error: HikariPool-1 - Connection is not available, request timed out after 30000ms.
+- Error: OOMKilled
 - Level: ERROR
 
 출력:
 {
-    "thought_process": "1. 분석: payment-api에서 HikariPool-1 커넥션 타임아웃 발생 확인.\\n2. 가설: 최근 트래픽 증가로 인해 DB 커넥션 풀이 고갈되었을 가능성 높음.\\n3. 검증: 현재 실행 중인 DB 세션 수와 설정된 최대 풀 사이즈 비교 필요.",
+    "thought_process": "1. 분석: Pod가 'OOMKilled' 상태로 강제 종료되었습니다. 이는 컨테이너가 할당된 메모리 한계(Memory Limit)를 초과했음을 의미합니다.\n2. 가설: 최근 배포된 버전에서 메모리 누수(Memory Leak)가 있거나, 동시 요청 급증으로 힙 메모리 사용량이 치솟았습니다.\n3. 검증: Pod의 이전 리소스 사용량 그래프(Grafana)와 dmesg 로그를 확인해야 합니다.",
     "cause": [
-        "DB Connection Pool Exhaustion due to High Concurrency (트래픽 급증으로 인한 DB 커넥션 풀 고갈 발생)",
-        "Slow Query causing Connection Hold (장기 실행 쿼리로 인한 커넥션 점유 지속)"
+        "Memory Limit Exceeded (Pod 메모리 제한 초과)",
+        "Application Memory Leak (애플리케이션 메모리 누수)"
     ],
     "action_plan": [
-        "진단\\nkubectl describe configmap payment-config\\n(설명: 현재 설정된 hikari.maximum-pool-size 값 확인)", 
-        "조치\\naws rds describe-db-instances\\n(설명: DB CPU 및 커넥션 상태 확인 후, 필요 시 인스턴스 스케일업 또는 풀 사이즈 증설)",
-        "검증\\nnetstat -an | grep 5432\\n(설명: ESTABLISHED 상태의 커넥션 수가 풀 사이즈 이내로 유지되는지 확인)"
+        "진단\\nkubectl top pod payment-api\\n(설명: 현재 메모리 사용량 및 설정된 Limit 대비 점유율 확인)", 
+        "조치\\nkubectl set resources deployment payment-api --limits=memory=2Gi\\n(설명: 메모리 부족이 확실하다면 Limit을 상향 조정)", 
+        "검증\\nkubectl get pod -w\\n(설명: Pod가 재시작 없이 Running 상태를 유지하는지 확인)"
     ]
 }
 
-[예시 2: Java OutOfMemory (OOM)]
+[예시 3: Payment Gateway Timeout]
 입력:
-- Service: recommendation-engine
-- Error: java.lang.OutOfMemoryError: Java heap space
+- Service: payment-api
+- Error: request timeout
 - Level: ERROR
 
 출력:
 {
-    "thought_process": "1. 분석: Java 힙 메모리 부족으로 인한 OOM 에러 발생.\\n2. 가설: 대량의 객체가 생성된 후 GC로 회수되지 않는 메모리 누수(Memory Leak)가 의심됨.\\n3. 검증: 힙 덤프(Heap Dump) 분석을 통해 메모리를 점유하는 객체 식별 필요.",
+    "thought_process": "1. 분석: 외부 PG(Payment Gateway) 호출 시 'request timeout'이 발생했습니다.\n2. 가설: PG 사의 장애로 인한 응답 지연이거나, 내부 네트워크의 Outbound 트래픽이 지연되고 있습니다.\n3. 검증: 외부 PG 상태 페이지 확인 및 내부 네트워크 레이턴시 측정이 필요합니다.",
     "cause": [
-        "Java Heap Space OutOfMemoryError (힙 메모리 부족으로 인한 OOM)",
-        "Memory Leak in Old Generation (Old Gen 영역의 메모리 누수 의심)"
+        "Payment Gateway Latency (PG사 서버 응답 지연)",
+        "Network Timeout (외부 네트워크 통신 타임아웃)"
     ],
     "action_plan": [
-        "진단\\njcmd 1 GC.heap_info\\n(설명: 현재 힙 메모리 사용량 및 Old Gen 점유율 확인. 90% 이상이면 위험)", 
-        "조치\\nkubectl set resources deployment recommendation-engine --limits=memory=2Gi\\n(설명: 메모리 리밋을 상향 조정하여 OOM 완화)", 
-        "검증\\nkubectl top pod\\n(설명: Pod의 메모리 사용량이 리밋의 70% 이하로 안정화되었는지 모니터링)"
-    ]
-}
-
-[예시 3: External API Timeout]
-입력:
-- Service: user-auth
-- Error: SocketTimeoutException: Read timed out (target: api.google.com)
-- Level: ERROR
-
-출력:
-{
-    "thought_process": "1. 분석: 외부 Google API 호출 중 Read Timeout 발생.\\n2. 가설: 외부 서비스 장애 또는 네트워크 지연(Network Latency) 발생.\\n3. 검증: 동일 시간대 다른 Pod에서의 호출 성공 여부 및 외부 서비스 상태 페이지 확인.",
-    "cause": [
-        "Upstream Dependency Timeout (외부 API 응답 지연 및 타임아웃)",
-        "Network Latency or Packet Loss (네트워크 지연 또는 패킷 손실 가능성)"
-    ],
-    "action_plan": [
-        "진단\\ncurl -v https://api.google.com/health\\n(설명: 외부 API 헬스 체크 엔드포인트 호출. 응답 시간 및 200 OK 확인)", 
-        "조치\\nkubectl logs -l app=user-auth --tail=100 | grep 'Timeout'\\n(설명: 타임아웃 발생 빈도 및 특정 시간대 집중 여부 파악)", 
-        "검증\\nnslookup api.google.com\\n(설명: DNS 해석이 정상적으로 되는지 확인하여 네트워크 문제 배제)"
+        "진단\\ncurl -v https://api.pg-provider.com/health\\n(설명: PG사 API 엔드포인트의 응답 속도 및 상태 확인)", 
+        "조치\\n(설명: PG사 장애 공지가 있다면 우회 결제 수단을 안내하거나, 애플리케이션의 Timeout 설정을 일시적으로 연장)", 
+        "검증\\n(설명: 타임아웃 에러 로그가 더 이상 발생하지 않는지 확인)"
     ]
 }
 """
