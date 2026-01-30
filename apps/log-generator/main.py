@@ -66,7 +66,6 @@ class CALIIncidentSimulator:
         )
 
     def run(self):
-        print(f"🔥 CALI Incident Simulator Running... (8:2 Ratio)")
         while True:
             dice = random.random()
 
