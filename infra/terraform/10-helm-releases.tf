@@ -1,8 +1,21 @@
+# ConfigMap for Airflow Python requirements
+
+resource "kubernetes_config_map" "airflow_requirements" {
+  metadata {
+    name      = "airflow-requirements"
+    namespace = "airflow"
+  }
+
+  data = {
+    "requirements.txt" = file("${path.module}/../../apps/airflow/requirements.txt")
+  }
+}
+
 resource "helm_release" "airflow" {
   name             = "airflow"
   repository       = "https://airflow.apache.org"
   chart            = "airflow"
-  version          = "1.11.0"
+  version          = "1.15.0"
   namespace        = "airflow"
   create_namespace = true
 
@@ -13,18 +26,7 @@ resource "helm_release" "airflow" {
   timeout = 900
   wait    = true
 
-  set {
-    name  = "postgresql.image.registry"
-    value = "827913617635.dkr.ecr.ap-northeast-2.amazonaws.com"
-  }
-  set {
-    name  = "postgresql.image.repository"
-    value = "cali/postgres"
-  }
-  set {
-    name  = "postgresql.image.tag"
-    value = "11"
-  }
+
 
   # Global ServiceAccount annotation (fallback)
   set {
@@ -50,8 +52,24 @@ resource "helm_release" "airflow" {
     value = aws_iam_role.airflow_role.arn
   }
 
+  # Use Custom ECR Image for Airflow
+  set {
+    name  = "images.airflow.repository"
+    value = aws_ecr_repository.airflow_custom.repository_url
+  }
+  set {
+    name  = "images.airflow.tag"
+    value = "latest"
+  }
+  set {
+    name  = "images.airflow.pullPolicy"
+    value = "Always"
+  }
+
   depends_on = [
-    kubernetes_storage_class.gp2
+    kubernetes_storage_class.gp2,
+    kubernetes_config_map.airflow_requirements,
+    null_resource.airflow_custom_build
   ]
 }
 

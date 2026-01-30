@@ -197,8 +197,8 @@ resource "aws_iam_role" "app_role" {
         Federated = aws_iam_openid_connect_provider.eks.arn
       }
       Condition = {
-        StringLike = {
-          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:*:*"
+        StringEquals = {
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:default:consumer-sa"
         }
       }
     }]
@@ -317,7 +317,13 @@ resource "aws_iam_role" "airflow_role" {
       }
       Condition = {
         StringEquals = {
-          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:airflow:airflow-sa"
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = [
+            "system:serviceaccount:airflow:airflow-sa",
+            "system:serviceaccount:airflow:airflow-scheduler",
+            "system:serviceaccount:airflow:airflow-webserver",
+            "system:serviceaccount:airflow:airflow-triggerer",
+            "system:serviceaccount:airflow:airflow-worker"
+          ]
         }
       }
     }]
