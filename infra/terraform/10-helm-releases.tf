@@ -27,7 +27,6 @@ resource "helm_release" "airflow" {
   wait    = true
 
 
-
   # Global ServiceAccount annotation (fallback)
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
