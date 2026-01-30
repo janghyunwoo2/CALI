@@ -71,9 +71,19 @@ class OpenAIClient:
             
             result = json.loads(response.choices[0].message.content)
             
-            # 응답 포맷 정규화 (action_plan -> action 문자열 변환 등)
-            if "action_plan" in result and isinstance(result["action_plan"], list):
-                result["action"] = "\n".join(result["action_plan"])
+            import re
+            def format_list(items):
+                if isinstance(items, list):
+                    # 이미 번호가 매겨져 있다면 제거 (예: "1. 원인" -> "원인", "2 . 원인" -> "원인")
+                    cleaned_items = [re.sub(r'^\d+\s*[\.\)]\s*', '', item) for item in items]
+                    return "\n\n".join([f"{i+1}. {item}" for i, item in enumerate(cleaned_items)])
+                return str(items)
+
+            if "cause" in result:
+                result["cause"] = format_list(result["cause"])
+
+            if "action_plan" in result:
+                result["action"] = format_list(result["action_plan"])
             
             # ReAct 추론 과정이 있다면 메타데이터에 포함할 수도 있음 (현재는 리턴값에 포함됨)
             

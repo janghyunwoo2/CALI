@@ -128,21 +128,40 @@ class SlackNotifier:
         # =========================================================
         # Attachment 2: Raw Error (Red)
         # =========================================================
+        error_blocks = [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "🔍 *원본 에러 메시지*"}
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"```{log_data.get('message')}```"
+                }
+            }
+        ]
+
+        # 전체 로그 (Stack Trace) 추가 - Slack이 길면 'Show more'로 접어줌 (토글 효과)
+        full_log = log_data.get('log_content', '')
+        if full_log and len(full_log) > 50:
+            error_blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "📜 *전체 로그 (Stack Trace)*"}
+            })
+            # Slack Block Kit 3000자 제한 고려하여 안전하게 자름
+            truncated_log = full_log[:2900] + "..." if len(full_log) > 2900 else full_log
+            error_blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"```{truncated_log}```"
+                }
+            })
+
         error_attachment = {
             "color": "#FF8888", # Soft Red
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": "🔍 *원본 에러 메시지*"}
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"```{log_data.get('message')}```"
-                    }
-                }
-            ]
+            "blocks": error_blocks
         }
 
         # =========================================================
@@ -206,14 +225,10 @@ class SlackNotifier:
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "📈 Grafana", "emoji": True},
-                            "url": "https://grafana.example.com",
+                            "url": "http://a4f67703ff36b4ebf8452f765ad62b07-1780094694.ap-northeast-2.elb.amazonaws.com",
                             "style": "primary"
                         },
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "🔍 Logs", "emoji": True},
-                            "url": "https://opensearch.example.com",
-                        },
+
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "👍 정확함", "emoji": True},

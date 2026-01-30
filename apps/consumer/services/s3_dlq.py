@@ -13,6 +13,7 @@ class S3DLQ:
     def __init__(self):
         self.s3_client = boto3.client("s3")
         self.bucket_name = settings.S3_DLQ_BUCKET if settings.S3_DLQ_BUCKET and settings.S3_DLQ_BUCKET != "pending" else "cali-dlq-bucket"
+        logger.info(f"S3 DLQ initialized. Target Bucket: {self.bucket_name}")
 
     def save_failed_record(self, record: dict, error_reason: str):
         """데이터 검증/파싱 실패 레코드 저장"""
@@ -36,6 +37,8 @@ class S3DLQ:
             
         except Exception as e:
             logger.error(f"DLQ 저장 실패: {e}")
+
+
 
     def save_rag_miss_log(self, log_record: dict, analysis_result: dict):
         """
@@ -61,9 +64,12 @@ class S3DLQ:
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=file_name,
-                Body=json.dumps(payload, ensure_ascii=False)
+                Body=json.dumps(payload, ensure_ascii=False, default=str)
             )
             logger.info(f"RAG Miss 로그 S3 저장 완료: {file_name}")
             
         except Exception as e:
-            logger.error(f"RAG Miss 로그 저장 실패: {e}")
+            logger.error(f"RAG Miss 로그 저장 실패 (Bucket: {self.bucket_name}, Key: {file_name}): {e}")
+            # 개발 단계 디버깅을 위해 Traceback 출력
+            import traceback
+            logger.error(traceback.format_exc())
