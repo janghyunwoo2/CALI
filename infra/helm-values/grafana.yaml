@@ -34,7 +34,7 @@ datasources:
   datasources.yaml:
     apiVersion: 1
     datasources:
-      - name: OpenSearch
+      - name: OpenSearch2
         type: grafana-opensearch-datasource
         url: https://search-cali-logs-brzk65m2qt5mktujvcaz3inde4.ap-northeast-2.es.amazonaws.com
         access: proxy
@@ -56,3 +56,4 @@ datasources:
           pplEnabled: false # 초기 설정 안정성을 위해 PPL 비활성화 권장
           # --------------------------------------------------
           sigV4AuthType: "default" # Use IRSA (IAM Roles for Service Accounts)
+          includeFrozen: false

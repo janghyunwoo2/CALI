@@ -26,8 +26,27 @@ resource "helm_release" "airflow" {
     value = "11"
   }
 
+  # Global ServiceAccount annotation (fallback)
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = aws_iam_role.airflow_role.arn
+  }
+
+  # Component-specific ServiceAccount annotations (Crucial for effective IRSA)
+  set {
+    name  = "scheduler.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = aws_iam_role.airflow_role.arn
+  }
+  set {
+    name  = "webserver.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = aws_iam_role.airflow_role.arn
+  }
+  set {
+    name  = "triggerer.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = aws_iam_role.airflow_role.arn
+  }
+  set {
+    name  = "workers.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = aws_iam_role.airflow_role.arn
   }
 
