@@ -3,6 +3,7 @@ import requests
 import json
 import subprocess
 import sys
+import importlib  # 메모리 새로고침을 위한 모듈
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor 
@@ -22,7 +23,7 @@ PROCESSED_PREFIX = 'processed/'
 
 default_args = {
     'owner': 'cali_admin',
-    'retries': 2,
+    'retries': 1,
     'retry_delay': timedelta(seconds=30),
 }
 
@@ -44,36 +45,39 @@ with DAG(
         timeout=60 * 30,
         poke_interval=30,
         mode='reschedule',
-        aws_conn_id=None, # 인프라 권한 꼬임 방지를 위해 None 유지
+        aws_conn_id=None,
         exponential_backoff=True
     )
 
-    # 2. 메인 로직 (설치 로직 포함)
+    # 2. 메인 로직 (런타임 설치 및 모듈 리로드 포함)
     def process_cali_rag_logic(**context):
-        # --- [내부 유틸: 패키지 강제 설치] ---
         def force_install(package):
             print(f"📦 {package} 설치 시도 중...")
-            # --user 옵션으로 권한 문제 해결, --upgrade로 버전 충돌 방지
             subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "--upgrade", package])
         
-        # 1. 패키지 설치 체크 및 실행
-        # typing_extensions를 가장 먼저 최신으로 깔아야 OpenAI 에러가 안 남
+        # 패키지 설치
         force_install('typing_extensions>=4.9.0')
         force_install('openai')
         force_install('pymilvus')
         
-        # 설치 후 임포트 (함수 내부에서 수행)
+        # --- [핵심: 메모리 새로고침] ---
+        # 이미 로드된 구버전 typing_extensions가 있다면 최신 버전으로 갈아끼움
+        import typing_extensions
+        importlib.reload(typing_extensions)
+        print("✅ typing_extensions 모듈 리로드 완료")
+        
+        # 설치 및 리로드 완료 후 임포트
         from openai import OpenAI
         from pymilvus import connections, Collection
 
-        # 2. API 키 로드
+        # API 키 로드
         try:
             api_key = Variable.get("OPENAI_API_KEY")
         except Exception as e:
             raise ValueError(f"Variable 'OPENAI_API_KEY' 누락: {e}")
         
-        # 3. S3에서 파일 읽기
-        s3_hook = S3Hook() # aws_conn_id=None 효과
+        # S3 데이터 로드
+        s3_hook = S3Hook()
         all_files = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix=SOLUTIONS_PREFIX)
         txt_files = [f for f in all_files if f.endswith('.txt') and f != SOLUTIONS_PREFIX]
         
@@ -84,7 +88,7 @@ with DAG(
         target_file = txt_files[0]
         raw_content = s3_hook.read_key(target_file, BUCKET_NAME)
         
-        # 4. 데이터 파싱
+        # 데이터 파싱
         try:
             log_data = json.loads(raw_content)
         except:
@@ -95,7 +99,7 @@ with DAG(
                 "action": raw_content
             }
 
-        # 5. OpenAI 임베딩 생성
+        # OpenAI 임베딩 생성
         ai_client = OpenAI(api_key=api_key)
         response = ai_client.embeddings.create(
             model="text-embedding-3-small",
@@ -103,7 +107,7 @@ with DAG(
         )
         vector = response.data[0].embedding
 
-        # 6. Milvus 적재
+        # Milvus 적재
         try:
             connections.connect("default", host=MILVUS_HOST, port=MILVUS_PORT)
             collection = Collection(COLLECTION_NAME)
@@ -128,7 +132,7 @@ with DAG(
         finally:
             connections.disconnect("default")
 
-        # 7. 파일 정리
+        # 파일 정리
         dest_key = target_file.replace(SOLUTIONS_PREFIX, PROCESSED_PREFIX)
         s3_hook.copy_object(source_bucket_key=target_file, dest_bucket_key=dest_key, 
                             source_bucket_name=BUCKET_NAME, dest_bucket_name=BUCKET_NAME)
