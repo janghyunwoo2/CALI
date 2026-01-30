@@ -40,7 +40,7 @@ datasources:
   datasources.yaml:
     apiVersion: 1
     datasources:
-      - name: OpenSearch2
+      - name: OpenSearch
         type: grafana-opensearch-datasource
         url: https://search-cali-logs-brzk65m2qt5mktujvcaz3inde4.ap-northeast-2.es.amazonaws.com
         access: proxy
