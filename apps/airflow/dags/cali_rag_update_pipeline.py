@@ -35,7 +35,6 @@ def process_cali_rag_logic(**context):
     if not api_key:
         raise ValueError("OPENAI_API_KEY가 없습니다.")
 
-    # S3Hook은 여전히 region_name을 직접 받는 게 안전해
     s3_hook = S3Hook(aws_conn_id=None, region_name=AWS_REGION) 
     
     all_files = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix='solutions/')
@@ -57,8 +56,7 @@ def process_cali_rag_logic(**context):
                 FieldSchema(name="error_message", dtype=DataType.VARCHAR, max_length=65535),
                 FieldSchema(name="action", dtype=DataType.VARCHAR, max_length=100)
             ]
-            schema = CollectionSchema(fields, "Cali RAG Knowledge Base")
-            col = Collection(COLLECTION_NAME, schema)
+            col = Collection(COLLECTION_NAME, CollectionSchema(fields, "Cali RAG Base"))
             col.create_index("vector", {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": 128}})
         else:
             col = Collection(COLLECTION_NAME)
@@ -72,24 +70,38 @@ def process_cali_rag_logic(**context):
             
             if len(content.strip()) < 10: continue
 
+            # OpenAI 임베딩 생성
             response = ai_client.embeddings.create(
                 model="text-embedding-3-small", 
                 input=[content.replace("\n", " ")]
             )
             vector = response.data[0].embedding
 
+            # Milvus 데이터 적재
             col.insert([[vector], ["cali_knowledge"], [content[:1024]], ["updated"]])
             col.flush()
+            print(f"✅ Milvus 적재 성공: {target_file}")
 
+            # [핵심 수정: 파일 이동 및 안전한 삭제]
             dest_key = target_file.replace('solutions/', 'processed/')
+            
+            # 1. 파일 복사 시도
             s3_hook.copy_object(
                 source_bucket_key=target_file, 
                 dest_bucket_key=dest_key, 
                 source_bucket_name=BUCKET_NAME, 
                 dest_bucket_name=BUCKET_NAME
             )
-            s3_hook.delete_objects(bucket=BUCKET_NAME, keys=target_file)
-            print(f"✅ 처리 완료 및 이동: {target_file} -> {dest_key}")
+            print(f"🚚 복사 완료: {dest_key}")
+
+            # 2. 안전한 삭제 시도 (리스트 형태로 전달 및 예외 처리)
+            try:
+                # delete_objects 대신 리스트형으로 keys 전달
+                s3_hook.delete_objects(bucket=BUCKET_NAME, keys=[target_file])
+                print(f"🗑️ 원본 삭제 성공: {target_file}")
+            except Exception as delete_err:
+                # 삭제 권한이 없더라도 적재는 성공했으므로 워닝만 띄우고 종료
+                print(f"⚠️ 삭제 실패 (권한 부족 가능성): {delete_err}")
 
     finally:
         connections.disconnect("default")
@@ -104,9 +116,6 @@ with DAG(
     tags=['cali', 'rag', 'eks', 'milvus']
 ) as dag:
 
-    # 🌟 [해결 전략] 
-    # S3KeySensor에서 문제가 되는 모든 선택적 인자를 제거하고, 
-    # EKS IAM Role이 자동으로 리전을 찾게끔 기본값만 유지해.
     wait_for_file = S3KeySensor(
         task_id='wait_for_solution_file',
         bucket_name=BUCKET_NAME,
@@ -115,7 +124,7 @@ with DAG(
         mode='reschedule',
         poke_interval=30,
         timeout=600,
-        aws_conn_id=None # IAM Role 사용 시 None 유지
+        aws_conn_id=None
     )
 
     run_main_logic = PythonOperator(
