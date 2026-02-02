@@ -65,54 +65,113 @@ class CALIIncidentSimulator:
         # OpenSearch 표준 ISO8601 형식
         return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
-    def write_log(self, level, svc, msg):
+    def write_log(self, level, svc, msg, extra_info=None):
         ver = self.services[svc]
         tid = str(uuid.uuid4())[:8]
         
-        # ⭐ 복구 포인트: 사람이 읽기 좋은 문자열 포맷
-        # 이 형식을 유지해야 Fluent-bit이 예전처럼 최상단 필드로 파싱합니다.
-        log_line = f"[{level}] {self.get_ts()} {svc}/{ver} [{tid}]: {msg}\n"
+        # 기본 로그
+        log_line = f"[{level}] {self.get_ts()} {svc}/{ver} [{tid}]: {msg}"
+        
+        # 추가 컨텍스트 정보가 있으면 JSON 스타일로 덧붙임
+        if extra_info:
+            context_str = ", ".join([f'{k}="{v}"' for k, v in extra_info.items()])
+            log_line += f" | Context: {{{context_str}}}"
+            
+        log_line += "\n"
         
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(log_line)
             f.flush()
         print(log_line.strip())
 
+    def generate_context(self, svc):
+        """서비스별 랜덤 컨텍스트 생성 (메타데이터)"""
+        if svc == "auth-security-svc":
+            return {
+                "UserAgent": self.fake.user_agent(),
+                "ClientIP": self.fake.ipv4(),
+                "AuthMethod": random.choice(["Bearer", "Basic", "OAuth2", "APIKey"]),
+                "Region": random.choice(["ap-northeast-2", "us-east-1", "eu-west-1"])
+            }
+        elif svc == "payment-gateway":
+            return {
+                "Amount": random.randint(1000, 500000),
+                "Currency": random.choice(["KRW", "USD", "JPY"]),
+                "CardType": random.choice(["Visa", "MasterCard", "Amex"]),
+                "MerchantID": f"M-{random.randint(1000, 9999)}"
+            }
+        elif svc == "biz-logic-engine":
+            return {
+                "ItemID": f"ITEM-{random.randint(100, 999)}",
+                "StockLevel": random.randint(-5, 100),
+                "CouponCode": self.fake.bothify(text='??-####-####').upper(),
+                "CartID": str(uuid.uuid4())[:8]
+            }
+        elif svc == "db-cache-cluster":
+            return {
+                "QueryTime": f"{random.randint(500, 5000)}ms",
+                "Table": random.choice(["Orders", "Users", "Payments", "Logs"]),
+                "LockWait": f"{random.randint(0, 1000)}ms",
+                "SQLState": random.choice(["40001", "08001", "23505"])
+            }
+        elif svc == "infra-eks-core":
+            return {
+                "PodName": f"{svc}-{random.randint(1, 5)}-{self.fake.bothify(text='?????')}",
+                "NodeIP": self.fake.ipv4_private(),
+                "CPU_Usage": f"{random.randint(80, 100)}%",
+                "Mem_Usage": f"{random.randint(85, 100)}%"
+            }
+        return {}
+
     def generate_incident(self):
         """핀테크 연쇄 장애 시나리오 (Knowledge Base 기반)"""
         incident_id = f"FIN-{str(uuid.uuid4())[:5].upper()}"
-        
-        # 시나리오 1: 보안 공격 -> DB 과부하 -> 결제 실패
         attacker_ip = self.fake.ipv4()
         
         # 1. 보안 공격 시작
         self.write_log("WARN", "auth-security-svc", 
-            f"Security Alert - [{incident_id}] Suspicious traffic pattern detected from {attacker_ip}")
+            f"Security Alert - [{incident_id}] Suspicious traffic.", 
+            {"ClientIP": attacker_ip, "ThreatLevel": "Medium"}
+        )
         time.sleep(0.5)
+        
         self.write_log("ERROR", "auth-security-svc", 
-            f"Security Alert - [{incident_id}] High rate of JWT validation failures from IP {attacker_ip}")
+            f"Security Alert - [{incident_id}] High rate of JWT validation failures.", 
+            {"ClientIP": attacker_ip, "FailCount": "150/s", "AuthMethod": "Bearer"}
+        )
         time.sleep(1)
 
-        # 2. 공격으로 인한 DB 커넥션 고갈 (db_issue.md 반영)
+        # 2. DB 연결 고갈
         self.write_log("ERROR", "db-cache-cluster", 
-            f"[{incident_id}] HikariPool-1 - Connection is not available, request timed out after 30000ms.")
+            f"[{incident_id}] HikariPool-1 - Connection is not available, request timed out.", 
+            {"WaitTime": "30000ms", "ActiveConnections": "50/50", "QueueSize": "200"}
+        )
         time.sleep(1)
 
-        # 3. DB 장애로 인한 결제 타임아웃 및 서킷 브레이커 발동
+        # 3. 결제 실패
         self.write_log("CRITICAL", "payment-gateway", 
-            f"[{incident_id}] External PG Timeout. Circuit Breaker: OPEN. Transaction rolled back.")
+            f"[{incident_id}] External PG Timeout. Circuit Breaker: OPEN.", 
+            {"CircuitState": "Open", "FailRate": "85%", "LastSuccess": "20s ago"}
+        )
 
     def run(self):
+        print(f"🔥 CALI Fintech Simulator Running... (Context Expanded)")
         while True:
             dice = random.random()
             
             # A. [1%] 로그 폭주 (DDoS / Brute Force 테스트)
             if dice < 0.01:
                 target_ip = self.fake.ipv4()
-                print(f"⚠️  Burst Mode: Attack from {target_ip}")
-                for _ in range(20):
-                    msg = random.choice(self.kb_errors["auth-security-svc"]).format(ip=target_ip, user="admin")
-                    self.write_log("WARN", "auth-security-svc", msg)
+                # 1. 메시지 고정
+                raw_msg = random.choice(self.kb_errors["auth-security-svc"])
+                msg = raw_msg.format(ip=target_ip, user="admin")
+                
+                # 2. 컨텍스트도 고정 (같은 공격이니까)
+                ctx = {"ClientIP": target_ip, "Action": "BruteForce", "TargetUser": "admin"}
+                
+                print(f"⚠️  Burst Mode: Attack from {target_ip} (30 identical logs)")
+                for _ in range(30):
+                    self.write_log("WARN", "auth-security-svc", msg, ctx)
                 time.sleep(1)
 
             # B. [5%] 치명적 연쇄 장애 (Incident)
@@ -120,13 +179,10 @@ class CALIIncidentSimulator:
                 self.generate_incident()
             
             # C. [20%] 일반 에러 (Knowledge Base에서 랜덤 추출)
-            elif dice < 0.20:
-                # 임의의 서비스 선택
+            elif dice < 0.26:
                 svc = random.choice(list(self.services.keys()))
-                # 해당 서비스의 KB 에러 목록에서 랜덤 선택
                 if svc in self.kb_errors:
                     raw_msg = random.choice(self.kb_errors[svc])
-                    # 포맷팅 필요 시 더미 데이터 주입
                     try:
                         msg = raw_msg.format(
                             ip=self.fake.ipv4(), 
@@ -134,16 +190,18 @@ class CALIIncidentSimulator:
                             uuid=str(uuid.uuid4())[:8]
                         )
                     except:
-                        msg = raw_msg # 포맷팅 실패 시 원본 사용
-
-                    self.write_log("ERROR", svc, f"Process Failed: {msg}")
+                        msg = raw_msg
+                    
+                    # 랜덤 컨텍스트 생성
+                    extra = self.generate_context(svc)
+                    self.write_log("ERROR", svc, f"Process Failed: {msg}", extra)
             
-            # D. [80%] 정상 로그
+            # D. [74%] 정상 로그
             else:
                 svc = random.choice(list(self.services.keys()))
                 self.write_log("INFO", svc, f"User {self.fake.user_name()} - Action Completed - 200 OK")
             
-            time.sleep(random.uniform(1, 2.5)) # 로그 발생 주기 약간 가속
+            time.sleep(random.uniform(1, 2.5))
 
 if __name__ == "__main__":
     CALIIncidentSimulator().run()
