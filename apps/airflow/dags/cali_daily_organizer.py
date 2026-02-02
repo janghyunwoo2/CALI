@@ -110,4 +110,5 @@ with DAG(
     catchup=False,
     tags=['eks', 'analysis', 'slack']
 ) as dag:
+    
     PythonOperator(task_id='process_logs_and_report', python_callable=daily_analysis_and_slack)
