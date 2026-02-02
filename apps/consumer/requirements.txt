@@ -22,4 +22,4 @@ requests==2.32.3
 # 유틸리티
 python-dotenv==1.0.1
 
-# TODO: 추가 패키지 필요 시 업데이트
+

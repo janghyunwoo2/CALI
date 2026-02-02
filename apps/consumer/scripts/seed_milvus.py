@@ -9,7 +9,7 @@ import glob
 import frontmatter  # pip install python-frontmatter
 from config.settings import settings
 from services.milvus_client import MilvusClient
-from services.openai_client import OpenAIClient
+from services.openai_client import AIClient
 from utils.logger import setup_logger
 from utils.text_preprocessor import clean_log_for_embedding
 
@@ -149,7 +149,7 @@ def seed_milvus():
     print(f"=== Milvus 지식 베이스 추가 (Source: {KB_DIR}/*.md) ===")
     
     milvus_client = MilvusClient()
-    ai_client = OpenAIClient()
+    ai_client = AIClient()
     
     md_files = glob.glob(os.path.join(KB_DIR, "*.md"))
     success_count = 0

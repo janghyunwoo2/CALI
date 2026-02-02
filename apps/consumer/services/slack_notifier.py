@@ -1,6 +1,6 @@
 import requests
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config.settings import settings
 # MVP 단계에서 Throttler가 미구현 상태라면 아래 줄을 주석 처리하거나 빈 클래스로 대체하세요.
@@ -117,7 +117,12 @@ class SlackNotifier:
         
         # 1. 메타데이터 가공
         ts = log_data.get('timestamp')
-        time_str = ts.strftime('%Y-%m-%d %H:%M:%S') if isinstance(ts, datetime) else str(ts)
+        if isinstance(ts, datetime):
+            ts = ts + timedelta(hours=9) # KST 강제 보정 (User Request)
+            time_str = ts.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            time_str = str(ts)
+        
         service = log_data.get('service', 'unknown')
         
         # Occurrence
@@ -153,7 +158,11 @@ class SlackNotifier:
         
         # 4. Similarity Bar 생성 (ASCII Art)
         # [▮▮▮▮▯▯▯▯▯▯] 10칸 (Thinner/Sleeker style)
-        fill_count = int(confidence_val / 10)
+        if confidence_val >= 99.0:
+            fill_count = 10
+        else:
+            fill_count = int(confidence_val / 10)
+            
         empty_count = 10 - fill_count
         bar_graph = "▮" * fill_count + "▯" * empty_count
         

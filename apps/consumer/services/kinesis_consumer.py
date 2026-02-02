@@ -16,7 +16,7 @@ from config.settings import settings
 from models.log_schema import LogRecord
 from pydantic import ValidationError
 from services.milvus_client import MilvusClient
-from services.openai_client import OpenAIClient
+from services.openai_client import AIClient
 from services.s3_dlq import S3DLQ
 from services.slack_notifier import SlackNotifier
 from services.throttle import Throttle
@@ -36,7 +36,7 @@ class KinesisConsumer:
         
         # 외부 서비스 클라이언트 초기화
         self.milvus_client = MilvusClient()
-        self.ai_client = OpenAIClient()
+        self.ai_client = AIClient()
         self.slack_notifier = SlackNotifier()
         self.dlq = S3DLQ()
         self.throttle = Throttle()
