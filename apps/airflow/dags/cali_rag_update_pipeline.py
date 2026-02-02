@@ -1,25 +1,22 @@
 import os
-import requests
-import json
-import sys
-import subprocess
+import time
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
+# 에어플로우 기본 모듈
 from airflow import DAG
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor 
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook 
 from airflow.operators.python import PythonOperator 
 from airflow.models import Variable
 
-# --- [1. 상수 설정] ---
-BUCKET_NAME = "cali-logs-827913617635" 
-MILVUS_HOST = "milvus-standalone.milvus.svc.cluster.local"
-MILVUS_PORT = "19530"
-COLLECTION_NAME = "cali_rag_collection"
-SLACK_WEBHOOK_URL = "" # 필요시 입력
+# 설정 로드
+load_dotenv()
 
-SOLUTIONS_PREFIX = 'solutions/'
-PROCESSED_PREFIX = 'processed/'
+# --- [1. 상수 및 설정] ---
+BUCKET_NAME = os.getenv('S3_BACKUP_BUCKET') or "cali-logs-827913617635"
+COLLECTION_NAME = "cali_logs"
+MILVUS_HOST = os.getenv('MILVUS_HOST') or "host.docker.internal"
 
 default_args = {
     'owner': 'cali_admin',
@@ -27,119 +24,157 @@ default_args = {
     'retry_delay': timedelta(seconds=30),
 }
 
+# --- [2. 메인 비즈니스 로직 함수] ---
+def process_cali_rag_logic(**context):
+    try:
+        from openai import OpenAI
+        from pymilvus import connections, Collection, utility, FieldSchema, CollectionSchema, DataType
+    except ImportError as e:
+        print(f"❌ 라이브러리 인식 실패: {e}")
+        raise 
+
+    api_key = os.getenv('OPENAI_API_KEY') or Variable.get("OPENAI_API_KEY", default_var=None)
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
+
+    s3_hook = S3Hook()
+    
+    # 1. S3 파일 목록 가져오기
+    all_files = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix='solutions/')
+    target_files = [f for f in all_files if f.endswith('.txt') and f != 'solutions/']
+    
+    if not target_files:
+        print("💡 처리할 파일이 없습니다.")
+        return
+
+    # 2. Milvus 연결 및 컬렉션 체크/생성
+    connections.connect("default", host=MILVUS_HOST, port="19530")
+    
+    try:
+        if not utility.has_collection(COLLECTION_NAME):
+            print(f"✨ {COLLECTION_NAME} 컬렉션이 없어 새로 생성합니다.")
+            fields = [
+                FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, auto_id=True),
+                FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=1536), # text-embedding-3-small
+                FieldSchema(name="service", dtype=DataType.VARCHAR, max_length=100),
+                FieldSchema(name="error_message", dtype=DataType.VARCHAR, max_length=65535),
+                FieldSchema(name="action", dtype=DataType.VARCHAR, max_length=100)
+            ]
+            schema = CollectionSchema(fields, "Cali RAG Error Logs Schema")
+            col = Collection(COLLECTION_NAME, schema)
+            
+            index_params = {
+                "metric_type": "L2",
+                "index_type": "IVF_FLAT",
+                "params": {"nlist": 128}
+            }
+            col.create_index(field_name="vector", index_params=index_params)
+            print("✅ 인덱스 생성 완료")
+        else:
+            col = Collection(COLLECTION_NAME)
+        
+        col.load()
+        ai_client = OpenAI(api_key=api_key)
+
+        for target_file in target_files:
+            print(f"📂 파일 처리 시작: {target_file}")
+            content = s3_hook.read_key(target_file, BUCKET_NAME)
+            
+            if len(content.strip()) < 20:
+                print(f"⚠️ {target_file}: 내용이 너무 짧아 스킵합니다.")
+                continue
+
+            # 임베딩 생성
+            response = ai_client.embeddings.create(
+                model="text-embedding-3-small", 
+                input=[content.replace("\n", " ")]
+            )
+            vector = response.data[0].embedding
+
+            # 3. Milvus 적재
+            data = [
+                [vector],
+                ["cali_service"],
+                [content[:1024]],
+                ["rag_updated"]
+            ]
+            col.insert(data)
+            print(f"🚀 {target_file} Milvus 적재 성공")
+
+            # 4. 파일 이동
+            dest_key = target_file.replace('solutions/', 'processed/')
+            s3_hook.copy_object(
+                source_bucket_key=target_file, 
+                dest_bucket_key=dest_key, 
+                source_bucket_name=BUCKET_NAME, 
+                dest_bucket_name=BUCKET_NAME
+            )
+            s3_hook.delete_objects(bucket=BUCKET_NAME, keys=target_file)
+            print(f"✅ {target_file} -> {dest_key} 이동 완료")
+
+    finally:
+        connections.disconnect("default")
+
+# --- [2-2. 데이터 검증 함수] ---
+def verify_milvus_data(**context):
+    try:
+        from pymilvus import connections, Collection
+    except ImportError:
+        raise
+    
+    connections.connect("default", host=MILVUS_HOST, port="19530")
+    try:
+        col = Collection(COLLECTION_NAME)
+        col.load()
+        
+        count = col.num_entities
+        print(f"📊 현재 컬렉션 내 총 데이터 개수: {count}")
+        
+        results = col.query(
+            expr="pk > 0",
+            output_fields=["pk", "service", "error_message", "action"],
+            limit=10
+        )
+        
+        print("🔍 --- [적재 데이터 샘플 확인] ---")
+        for i, res in enumerate(results):
+            print(f"[{i+1}] PK: {res['pk']} | Action: {res['action']}")
+            print(f"    Msg: {res['error_message'][:100]}...")
+        print("------------------------------------------")
+        
+    finally:
+        connections.disconnect("default")
+
+# --- [3. 에어플로우 DAG 정의] ---
 with DAG(
-    dag_id='cali_rag_unified_pipeline',
+    dag_id='cali_rag_update_pipeline',
     default_args=default_args,
     start_date=datetime(2026, 1, 27),
     schedule_interval=None,
     catchup=False,
-    tags=['cali', 'rag', 'milvus', 'openai']
+    tags=['cali', 'rag', 'milvus']
 ) as dag:
 
-    # 1. S3 파일 감시 (solutions/ 폴더에 .txt 파일이 들어오는지 체크)
     wait_for_file = S3KeySensor(
         task_id='wait_for_s3_file',
         bucket_name=BUCKET_NAME,
-        bucket_key=f'{SOLUTIONS_PREFIX}*.txt',
+        bucket_key='solutions/*.txt',
         wildcard_match=True,
-        timeout=60 * 30,
-        poke_interval=30,
         mode='reschedule',
-        aws_conn_id=None,
-        exponential_backoff=True
+        poke_interval=60,
+        timeout=60 * 60
     )
-
-    # 2. 메인 로직 (임베딩 및 Milvus 적재)
-    def process_cali_rag_logic(**context):
-        # [A] 환경 검증 및 패키지 리스트 확인 (담당자 압박용 로그)
-        print(f"🐍 Python Executable: {sys.executable}")
-        try:
-            pip_list = subprocess.check_output([sys.executable, "-m", "pip", "list"]).decode()
-            print(f"📋 Installed Packages:\n{pip_list}")
-        except:
-            print("⚠️ 패키지 목록 조회 실패")
-
-        # [B] Lazy Import (서버 환경 미비 시 DAG 깨짐 방지)
-        try:
-            from openai import OpenAI
-            from pymilvus import connections, Collection
-        except ImportError as e:
-            print(f"❌ 라이브러리 인식 실패: {e}")
-            raise 
-
-        # [C] 데이터 로드 로직
-        api_key = Variable.get("OPENAI_API_KEY")
-        s3_hook = S3Hook()
-        all_files = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix=SOLUTIONS_PREFIX)
-        txt_files = [f for f in all_files if f.endswith('.txt') and f != SOLUTIONS_PREFIX]
-        
-        if not txt_files:
-            print("처리할 파일이 없습니다.")
-            return 
-            
-        target_file = txt_files[0]
-        raw_content = s3_hook.read_key(target_file, BUCKET_NAME)
-        print(f"📄 파일 로드 완료: {target_file}")
-        
-        try:
-            log_data = json.loads(raw_content)
-        except:
-            log_data = {"service": "manual", "message": raw_content[:100], "action": raw_content}
-
-        # [D] OpenAI 임베딩 생성
-        ai_client = OpenAI(api_key=api_key)
-        response = ai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=log_data.get("message", "")
-        )
-        vector = response.data[0].embedding
-        print("✅ OpenAI 임베딩 생성 완료")
-
-        # [E] Milvus 적재 (문법 오류 수정 및 flush 제거)
-        try:
-            connections.connect("default", host=MILVUS_HOST, port=MILVUS_PORT)
-            collection = Collection(COLLECTION_NAME)
-            
-            # 따옴표 처리를 f-string 밖에서 미리 수행 (TypeError/SyntaxError 방지)
-            svc_name = str(log_data.get("service", "unknown")).replace("'", "\\'")
-            err_msg = str(log_data.get("message", "")).replace("'", "\\'")
-            
-            # 기존 데이터 삭제 (Upsert 효과)
-            delete_expr = f"service == '{svc_name}' && error_message == '{err_msg}'"
-            collection.delete(delete_expr)
-            
-            # 데이터 삽입 (Milvus 2.6+ 권장 사항: flush() 호출 생략)
-            collection.insert([{
-                "vector": vector,
-                "service": svc_name[:64],
-                "error_message": err_msg[:1024],
-                "cause": str(log_data.get("cause", "N/A"))[:2048],
-                "action": str(log_data.get("action", ""))[:2048],
-            }])
-            
-            print(f"🚀 Milvus 적재 성공: {target_file}")
-            
-        finally:
-            connections.disconnect("default")
-
-        # [F] S3 파일 정리 (처리 완료 폴더로 이동)
-        dest_key = target_file.replace(SOLUTIONS_PREFIX, PROCESSED_PREFIX)
-        s3_hook.copy_object(source_bucket_key=target_file, dest_bucket_key=dest_key, 
-                            source_bucket_name=BUCKET_NAME, dest_bucket_name=BUCKET_NAME)
-        s3_hook.delete_objects(bucket=BUCKET_NAME, keys=target_file)
-        print(f"📁 파일 이동 완료: {target_file} -> {dest_key}")
 
     run_main_logic = PythonOperator(
         task_id='run_cali_main_logic',
-        python_callable=process_cali_rag_logic
+        python_callable=process_cali_rag_logic,
+        provide_context=True
     )
 
-    # 알림 로직 (선택 사항)
-    def send_report(**context):
-        if SLACK_WEBHOOK_URL:
-            requests.post(SLACK_WEBHOOK_URL, data=json.dumps({"text": "✅ RAG 업데이트 완료!"}))
+    verify_data = PythonOperator(
+        task_id='verify_milvus_data',
+        python_callable=verify_milvus_data,
+        provide_context=True
+    )
 
-    notify_complete = PythonOperator(task_id='notify_complete', python_callable=send_report)
-
-    # 파이프라인 흐름
-    wait_for_file >> run_main_logic >> notify_complete
+    wait_for_file >> run_main_logic >> verify_data
