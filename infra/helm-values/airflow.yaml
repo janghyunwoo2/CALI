@@ -1,9 +1,17 @@
 # Airflow Helm Values
 executor: "LocalExecutor"
 
+# PostgreSQL Configuration (Use ECR)
+postgresql:
+  image:
+    registry: 827913617635.dkr.ecr.ap-northeast-2.amazonaws.com
+    repository: cali/postgres
+    tag: "11"
+
 # Explicitly enable standard jobs for DB migration and User creation
 migrateDatabaseJob:
   enabled: true
+  useHelmHooks: true
 
 # createUserJob:
 #   enabled: true
@@ -14,14 +22,36 @@ airflow:
   config:
     AIRFLOW__CORE__LOAD_EXAMPLES: "False"
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+    AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+    AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: "300"
+
+# Use a fixed secret key for all components (scheduler, webserver, etc.)
+webserverSecretKey: cali_airflow_secret_key_2026_fixed
 
 serviceAccount:
   create: true
   name: airflow-sa
 
+scheduler:
+  extraInitContainers: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
 webserver:
   service:
     type: LoadBalancer
+  startupProbe:
+    failureThreshold: 20
+    periodSeconds: 10
+    timeoutSeconds: 10
+  extraInitContainers: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+triggerer:
+  extraInitContainers: []
+  extraVolumes: []
+  extraVolumeMounts: []
 
 dags:
   gitSync:
