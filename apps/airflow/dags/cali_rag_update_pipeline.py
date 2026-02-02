@@ -35,7 +35,7 @@ def process_cali_rag_logic(**context):
     if not api_key:
         raise ValueError("OPENAI_API_KEY가 없습니다.")
 
-    # S3Hook은 region_name을 직접 받을 수 있음
+    # S3Hook은 여전히 region_name을 직접 받는 게 안전해
     s3_hook = S3Hook(aws_conn_id=None, region_name=AWS_REGION) 
     
     all_files = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix='solutions/')
@@ -81,7 +81,6 @@ def process_cali_rag_logic(**context):
             col.insert([[vector], ["cali_knowledge"], [content[:1024]], ["updated"]])
             col.flush()
 
-            # [파일 이동 로직]
             dest_key = target_file.replace('solutions/', 'processed/')
             s3_hook.copy_object(
                 source_bucket_key=target_file, 
@@ -105,8 +104,9 @@ with DAG(
     tags=['cali', 'rag', 'eks', 'milvus']
 ) as dag:
 
-    # 🌟 [에러 수정 핵심 포인트] 
-    # S3KeySensor는 region_name을 직접 받지 않고 hook_params에 넣어야 함
+    # 🌟 [해결 전략] 
+    # S3KeySensor에서 문제가 되는 모든 선택적 인자를 제거하고, 
+    # EKS IAM Role이 자동으로 리전을 찾게끔 기본값만 유지해.
     wait_for_file = S3KeySensor(
         task_id='wait_for_solution_file',
         bucket_name=BUCKET_NAME,
@@ -115,11 +115,7 @@ with DAG(
         mode='reschedule',
         poke_interval=30,
         timeout=600,
-        aws_conn_id=None,
-        verify=False,
-        hook_params={
-            "region_name": AWS_REGION  # <-- 요렇게 주머니에 담아줘야 함!
-        }
+        aws_conn_id=None # IAM Role 사용 시 None 유지
     )
 
     run_main_logic = PythonOperator(
