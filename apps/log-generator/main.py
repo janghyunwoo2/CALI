@@ -1,9 +1,11 @@
+import os
 import random
 import time
 import uuid
-import os
 from datetime import datetime
+
 from faker import Faker
+
 
 class CALIIncidentSimulator:
     def __init__(self):
@@ -16,11 +18,11 @@ class CALIIncidentSimulator:
             "auth-security-svc": "v4.2.1",
             "biz-logic-engine": "v1.12.0"
         }
-        
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.log_dir = os.path.join(base_dir, "logs")
         self.log_file = os.path.join(self.log_dir, "app.log")
-        
+
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
@@ -202,6 +204,7 @@ class CALIIncidentSimulator:
                 self.write_log("INFO", svc, f"User {self.fake.user_name()} - Action Completed - 200 OK")
             
             time.sleep(random.uniform(1, 2.5))
+
 
 if __name__ == "__main__":
     CALIIncidentSimulator().run()

@@ -1,23 +1,21 @@
-import random
-from config.settings import settings
-from services.milvus_client import MilvusClient
-from services.openai_client import OpenAIClient
-from utils.logger import setup_logger
-
-logger = setup_logger(__name__)
-
+import sys
 import os
+
+# Add project root to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import random
 import glob
 import frontmatter  # pip install python-frontmatter
 from config.settings import settings
 from services.milvus_client import MilvusClient
-from services.openai_client import OpenAIClient
+from services.openai_client import AIClient
 from utils.logger import setup_logger
 from utils.text_preprocessor import clean_log_for_embedding
 
 logger = setup_logger(__name__)
 
-KB_DIR = "knowledge_base"
+KB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "knowledge_base")
 CHUNK_SIZE = 500  # 청킹 기준 (글자 수)
 CHUNK_OVERLAP = 100  # 중복 허용 범위
 
@@ -148,10 +146,10 @@ def parse_markdown_kb_legacy(file_path):
         return None
 
 def seed_milvus():
-    print(f"=== Milvus 지식 베이스 초기화 (Source: {KB_DIR}/*.md) ===")
+    print(f"=== Milvus 지식 베이스 추가 (Source: {KB_DIR}/*.md) ===")
     
     milvus_client = MilvusClient()
-    ai_client = OpenAIClient()
+    ai_client = AIClient()
     
     md_files = glob.glob(os.path.join(KB_DIR, "*.md"))
     success_count = 0
@@ -181,7 +179,8 @@ def seed_milvus():
                 
                 # 3. 기존 데이터 삭제 (Upsert)
                 # 대량 처리를 위해 flush=False 설정
-                milvus_client.delete_log_case(case['service'], case['message'], flush=False)
+                # 중복 방지 삭제 로직 제거 (Append 모드)
+                # milvus_client.delete_log_case(case['service'], case['message'], flush=False)
                 
                 # 4. 저장
                 for i, chunk in enumerate(chunks):

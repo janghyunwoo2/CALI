@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     SLACK_WEBHOOK_URL: str
     OPENAI_MODEL: str = "gpt-4o"
-
+    
     # [추후 필요한 변수들] - Optional로 설정하여 현재는 몰라도 에러 안 나게 함
     KINESIS_STREAM_NAME: Optional[str] = "pending"
     S3_DLQ_BUCKET: Optional[str] = "cali-logs-827913617635"

@@ -1,6 +1,6 @@
 import requests
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config.settings import settings
 # MVP 단계에서 Throttler가 미구현 상태라면 아래 줄을 주석 처리하거나 빈 클래스로 대체하세요.
@@ -117,33 +117,55 @@ class SlackNotifier:
         
         # 1. 메타데이터 가공
         ts = log_data.get('timestamp')
-        time_str = ts.strftime('%Y-%m-%d %H:%M:%S') if isinstance(ts, datetime) else str(ts)
+        if isinstance(ts, datetime):
+            ts = ts + timedelta(hours=9) # KST 강제 보정 (User Request)
+            time_str = ts.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            time_str = str(ts)
+        
         service = log_data.get('service', 'unknown')
         
         # Occurrence
         occurrence_count = rag_info.get("occurrence_count", 1) 
         occurrence_text = f"최근 1분간 {occurrence_count}건 발생" if occurrence_count > 1 else "신규 발생"
 
-        # RAG Mode & Metric
+        # RAG Mode & Metric (Re-designed)
         source = rag_info.get("source", "Unknown")
         distance = rag_info.get("distance", 1.0)
         
-        if source == "Cache Hit":
-            mode_text = "⚡ Fast Path (Cache)"
-            confidence = f"{min((1.0 - distance) * 100 + 20, 99.9):.1f}%"
-            latency_text = "0ms (Cache)"
-            # mode_color = "#36a64f"
-        elif distance < 0.65:
-            mode_text = "🤖 Medium Path (Few-Shot)"
-            confidence = f"{min((1.0 - distance) * 100, 95):.1f}%"
-            latency_text = rag_info.get("latency", "N/A")
-            # mode_color = "#ecb22e"
-        else:
-            mode_text = "🧠 Slow Path (ReAct)"
-            confidence = "N/A (Reasoning)"
-            latency_text = rag_info.get("latency", "N/A")
-            # mode_color = "#e01e5a"
+        # 신뢰도 및 모드 결정 로직
+        # Milvus L2 Distance -> Cosine Similarity 변환
+        # OpenAI 임베딩은 Normalized이므로: Distance^2 = 2 * (1 - Similarity)
+        # Similarity = 1 - (Distance^2 / 2)
+        similarity = 1.0 - (distance ** 2 / 2.0)
+        confidence_val = max(0.0, similarity * 100.0)
 
+        if source == "Cache Hit":
+            mode_text = "지식 기반 (Cached)" 
+            badge = "📚" 
+            latency_text = "0ms (Cache)"
+            confidence_val = 99.9 # Cache는 100% 가정
+        elif confidence_val >= 80.0: # Sim 0.8 이상 (Standard/Few-Shot)
+            mode_text = "지식 기반 (Standard)"
+            badge = "🔍" 
+            latency_text = rag_info.get("latency", "N/A")
+        else:
+            mode_text = "심층 추론 (Advanced)"
+            badge = "❓"
+            latency_text = rag_info.get("latency", "N/A")
+
+        confidence_str = f"{confidence_val:.1f}%"
+        
+        # 4. Similarity Bar 생성 (ASCII Art)
+        # [▮▮▮▮▯▯▯▯▯▯] 10칸 (Thinner/Sleeker style)
+        if confidence_val >= 99.0:
+            fill_count = 10
+        else:
+            fill_count = int(confidence_val / 10)
+            
+        empty_count = 10 - fill_count
+        bar_graph = "▮" * fill_count + "▯" * empty_count
+        
         # =========================================================
         # Attachment 1: Header + Metadata (Gray/Default)
         # =========================================================
@@ -154,17 +176,18 @@ class SlackNotifier:
                     "type": "header",
                     "text": {
                         "type": "plain_text",
-                        "text": f"⚠️ 장애 감지: {service} ({occurrence_text})",
+                        "text": f"💡 분석 결과: {service}",
                         "emoji": True
                     }
                 },
                 {
-                    "type": "section", # Context 대신 Section+Fields 사용 (가독성 UP)
+                    "type": "section",
                     "fields": [
-                        {"type": "mrkdwn", "text": f"*서비스:*\n{service}"},
-                        {"type": "mrkdwn", "text": f"*시간:*\n{time_str}"},
-                        {"type": "mrkdwn", "text": f"*모드:*\n`{mode_text}`"},
-                        {"type": "mrkdwn", "text": f"*AI 응답속도:*\n{latency_text}"}
+                        {"type": "mrkdwn", "text": f"*발생 시각:*\n{time_str}"},
+                        {"type": "mrkdwn", "text": f"*분석 모드:*\n{badge} {mode_text}"},
+                        {"type": "mrkdwn", "text": f"*지식 일치율:*\n`[{bar_graph}]` {confidence_str}"},
+                        {"type": "mrkdwn", "text": f"*AI 응답속도:*\n{latency_text}"},
+                        {"type": "mrkdwn", "text": f"*발생 빈도:*\n{occurrence_text}"}
                     ]
                 }
             ]
