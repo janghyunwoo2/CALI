@@ -348,7 +348,8 @@ resource "aws_iam_policy" "workload_s3_access" {
           "s3:PutObjectAcl",
           "s3:GetObject",
           "s3:GetBucketLocation",
-          "s3:ListBucket"
+          "s3:ListBucket",
+          "s3:DeleteObject" # Airflow DAG에서 S3 객체 삭제 권한
         ]
         Resource = [
           aws_s3_bucket.logs.arn,
