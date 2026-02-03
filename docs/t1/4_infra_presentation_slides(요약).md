@@ -52,44 +52,175 @@
 
 ```mermaid
 graph TB
-    subgraph "Terraform Stack"
-        A[providers.tf<br/>AWS/Helm/K8s Provider]
-        B[06-iam.tf<br/>7개 IAM Role]
-        C[Data Streaming<br/>Kinesis+Firehose]
-        D[Compute<br/>EKS Cluster]
-        E[Applications<br/>Helm Charts×4]
+    subgraph "Terraform 배포 순서"
+        A[providers.tf<br/>AWS/Helm/K8s Provider 설정]
+        B[06-iam.tf<br/>IAM Role 7개 생성]
+        C[Data Layer<br/>Kinesis, S3, OpenSearch]
+        D[05-eks.tf<br/>EKS Cluster + Node Group]
+        E[10-helm-releases.tf<br/>Airflow, Milvus, Grafana, Fluent Bit]
+        F[11-k8s-apps.tf<br/>Consumer, Log Generator]
     end
     
     A --> B
     B --> C
     B --> D
     D --> E
+    D --> F
     
-    style B fill:#ff6b6b
-    style D fill:#4ecdc4
-    style E fill:#95e1d3
+    style A fill:#e0e0e0,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#ff6b6b,stroke:#333,stroke-width:2px,color:#fff
+    style C fill:#ffd93d,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#4ecdc4,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#95e1d3,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#a8e6cf,stroke:#333,stroke-width:2px,color:#000
 ```
 
-**Infrastructure as Code 핵심 원칙**
+**Infrastructure as Code 배포 순서**
 
-| 계층 | 리소스 | 배포 방식 |
-|------|--------|----------|
-| **Foundation** | IAM, VPC | Terraform 우선 생성 |
-| **Data Layer** | Kinesis, S3, OpenSearch | Terraform 병렬 생성 |
-| **Compute** | EKS Cluster, Node Group | Terraform 순차 생성 |
-| **Applications** | Fluent Bit, Milvus, Airflow, Grafana | Helm Provider |
+| 단계 | Terraform 파일 | 생성 리소스 | 배포 방식 |
+|------|---------------|------------|----------|
+| **1단계** | `providers.tf` | AWS, Helm, Kubernetes Provider | 초기 설정 |
+| **2단계** | `06-iam.tf` | 7개 IAM Role (EKS, Airflow, App 등) | 우선 생성 (다른 리소스가 참조) |
+| **3단계** | `01-kinesis.tf`, `02-s3.tf`, `03-opensearch.tf` | Kinesis Stream, S3 Bucket, OpenSearch | 병렬 생성 |
+| **4단계** | `05-eks.tf` | EKS Cluster, Node Group (t3.medium × 2~4) | 순차 생성 (12분 소요) |
+| **5단계** | `07-ecr.tf` | Container Registry (Airflow, Consumer, Log Generator) | 이미지 빌드/푸시 |
+| **6단계** | `10-helm-releases.tf` | Airflow, Milvus, Grafana, Fluent Bit | Helm Provider로 자동 배포 |
+| **7단계** | `11-k8s-apps.tf` | Consumer, Log Generator Deployment | Kubernetes Provider |
+| **8단계** | `08-autoscaler.tf`, `09-metrics-server.tf` | Cluster Autoscaler, Metrics Server | Auto-scaling 인프라 |
 
 **핵심 수치**
-- Terraform 파일: 13개
-- 배포 시간: **25분**
-- 수동 클릭: **0회**
+- **Terraform 파일**: 13개
+- **배포 시간**: **25분** (OpenSearch 18분 + EKS 12분이 대부분)
+- **수동 클릭**: **0회** (완전 자동화)
+- **재현 가능성**: **100%** (코드 = 문서)
 
 ### 발표자 노트 (3분)
 
-- **아키텍처 설명**: "IAM을 먼저 만들어야 다른 리소스가 참조 가능"
-- **Terraform + Helm 통합 강조**: "Kubernetes 앱까지 Terraform으로 관리"
-- **배포 시간**: "OpenSearch 18분, EKS 12분이 대부분. AWS 프로비저닝 시간"
-- **포인트**: "코드 한 줄도 직접 수정 없이 재현 가능"
+- **배포 순서 강조**: "IAM을 먼저 만들어야 EKS, Airflow 등이 해당 Role을 참조할 수 있습니다"
+- **Terraform + Helm 통합**: "Kubernetes 애플리케이션(Airflow, Milvus)까지 Terraform `helm_release` 리소스로 관리합니다"
+- **배포 시간 설명**: "25분 중 대부분은 AWS 프로비저닝 시간입니다. OpenSearch가 18분으로 가장 오래 걸립니다"
+- **핵심 포인트**: "코드만 있으면 누구나 동일한 인프라를 재현할 수 있습니다. 수동 설정 0건"
+- **실제 예시**: "팀원이 새로 합류해도 `terraform apply` 한 번이면 끝"
+
+
+---
+
+## 🔐 Slide 2.5: IAM 권한 설계 (보안)
+
+### 제목
+**"IRSA와 Least Privilege: 보안 사고를 사전에 차단"**
+
+### 슬라이드 내용
+
+**왜 IRSA와 Least Privilege인가?**
+
+| 기술 | 해결하는 문제 | 사용 안 하면? (위험) |
+|------|--------------|---------------------|
+| **IRSA** | Pod마다 다른 AWS 권한 필요<br/>(Consumer는 Kinesis 읽기<br/>Airflow는 S3 쓰기) | ❌ AWS Access Key 하드코딩<br/>❌ Git 노출 위험<br/>❌ 모든 Pod 동일 권한 사용 |
+| **Least Privilege** | 해킹/실수 시 피해 최소화<br/>(Firehose는 S3 쓰기만) | ❌ 관리자 권한 남발<br/>❌ 실수로 전체 S3 삭제 가능<br/>❌ 해킹 시 모든 리소스 접근 |
+
+**IAM Role 구성 (Least Privilege 적용)**
+
+| Pod / Service | ServiceAccount | IAM Role | 권한 범위 |
+|---------------|----------------|----------|----------|
+| **Consumer** | `consumer-sa` | `cali-app-role` | Kinesis 읽기, S3 쓰기 <br/>(리소스: `cali-*`만) |
+| **Airflow** | `airflow-*` (5개) | `cali-airflow-role` | S3 읽기/쓰기 <br/>(버킷: `cali-logs-*`만) |
+| **Grafana** | `grafana` | `cali-grafana-role` | OpenSearch 읽기 전용 |
+| **Cluster Autoscaler** | `cluster-autoscaler` | `cali-autoscaler-role` | Auto Scaling 제어 <br/>(태그: `cali-*`만) |
+| **Firehose** | (AWS Service) | `cali-firehose-role` | S3 `PutObject`만 <br/>(읽기/삭제 불가) |
+
+**핵심 수치**
+- **IAM Role 개수**: 7개 (역할별 완전 분리)
+- **하드코딩된 AWS Credentials**: **0개** (IRSA 100% 적용)
+- **관리자 권한 사용**: **0건** (Least Privilege 100%)
+- **리소스 제한**: 모든 정책에 `cali-*` ARN 명시
+
+### 발표자 노트 (3분)
+
+- **IRSA 강조**: "Pod에 AWS Key를 환경 변수로 넣지 않습니다. OIDC를 통해 임시 자격 증명을 자동 발급받습니다"
+- **실제 예시**: "만약 Consumer Pod이 해킹당해도, Kinesis와 S3만 접근 가능하고 EC2나 RDS는 건드릴 수 없습니다"
+- **Least Privilege 사례**: 
+  - "Firehose는 S3에 쓰기만 가능합니다. 실수로 삭제할 수 없습니다"
+  - "모든 권한에 리소스 ARN이 `cali-*`로 제한되어 있어, 다른 프로젝트 리소스는 접근 불가"
+- **비교 강조**: "만약 AdministratorAccess를 쓴다면? 해커가 전체 AWS 계정을 장악할 수 있습니다"
+- **교훈**: "보안은 나중에 추가하는 게 아니라, 처음부터 설계에 포함해야 합니다"
+
+---
+
+## ☸️ Slide 2.6: EKS Cluster 배포
+
+### 제목
+**"EKS 인프라 자동 배포: 06-iam.tf → 05-eks.tf 순차 생성"**
+
+### 슬라이드 내용
+
+**EKS Terraform 배포 순서 (`05-eks.tf`)**
+
+| 단계 | 리소스 | 생성 내용 | 배포 방식 |
+|------|--------|----------|----------|
+| **1단계** | VPC/Subnet (Data Source) | 기본 VPC 및 서브넷 조회 | 기존 리소스 참조 |
+| **2단계** | `aws_eks_cluster.main` | EKS Cluster 1.29<br/>- API/Audit/Authenticator 로깅<br/>- Public + Private 엔드포인트 | **~8분 소요**<br/>IAM Role 의존 |
+| **3단계** | `aws_eks_node_group.main` | Node Group (t3.medium)<br/>- Min/Desired/Max: 2/2/4<br/>- On-Demand 인스턴스 | **~4분 소요**<br/>Cluster 생성 후 |
+| **4단계** | `aws_eks_access_entry` | 팀원 EKS 등록<br/>- IAM ARN → EKS 연결 | for_each로 병렬 생성 |
+| **5단계** | `aws_eks_access_policy_association` | 팀원별 Admin 권한 부여<br/>- AmazonEKSClusterAdminPolicy 연결 | Access Entry 생성 후 |
+| **6단계** | `aws_iam_openid_connect_provider` | OIDC Provider 생성<br/>- **IRSA 기반 구축**<br/>- EKS ↔ IAM 신뢰 관계 설정 | **모든 IRSA의 전제조건**<br/>06-iam.tf 7개 Role이 참조 |
+| **7단계** | `aws_eks_addon.ebs_csi` | EBS CSI Driver Addon<br/>- PVC/StorageClass 지원 | Node Group 준비 후 |
+
+**의존성 체인 (Terraform `depends_on`)**
+
+```
+06-iam.tf (IAM Roles)
+    ↓
+05-eks.tf (EKS Cluster) ← 8분
+    ↓
+Node Group ← 4분
+    ↓
+OIDC Provider → 모든 IRSA Role 연동
+    ↓
+Access Entry (팀원 접근)
+    ↓
+EBS CSI Addon (스토리지)
+```
+
+**핵심 수치**
+- **총 배포 시간**: **~12분** (EKS Cluster 8분 + Node Group 4분)
+- **리소스 개수**: 7개 (Cluster, Node Group, OIDC, Access Entry×2, Policy×2, Addon)
+- **Auto-scaling 범위**: 2 → 4 노드 (Cluster Autoscaler 연동)
+- **팀원 추가**: `terraform.tfvars`에 ARN 추가 → `apply` 1번
+
+**배포 후 즉시 사용 가능**
+```bash
+# 1. kubectl 설정 (1회)
+aws eks update-kubeconfig --name cali-cluster --region ap-northeast-2
+
+# 2. 즉시 확인
+kubectl get nodes
+# NAME                          STATUS   AGE
+# ip-172-31-47-63...internal    Ready    5d
+# ip-172-31-62-32...internal    Ready    5d
+```
+
+### 발표자 노트 (3분)
+
+- **배포 순서 강조**: "IAM Role을 먼저 만들어야(06-iam.tf) EKS가 해당 Role을 참조할 수 있습니다"
+- **EKS Cluster 생성 (8분)**:
+  - "Control Plane 프로비저닝 시간"
+  - "API, Audit, Authenticator 로깅 활성화로 모든 클러스터 활동 감사 가능"
+- **Node Group (4분)**:
+  - "t3.medium × 2개로 시작, 최대 4개까지 자동 확장"
+  - "On-Demand 타입으로 안정성 우선 (Spot보다 비싸지만 신뢰성 높음)"
+- **OIDC Provider**:
+  - "6단계에서 생성되지만, 모든 IRSA의 기반"
+  - "이 Provider가 EKS와 IAM 사이의 신뢰 관계를 수립함"
+  - "실제 각 서비스의 IRSA 설정은 06-iam.tf에서 진행 (Consumer, Airflow, Grafana 등 7개 Role)"
+  - "이게 없으면 06-iam.tf의 모든 IRSA Role이 작동 불가"
+- **Access Entry (팀 협업)**:
+  - "팀원 ARN만 추가하면 자동으로 kubectl 접근 권한 부여"
+  - "`update-kubeconfig` 한 줄로 즉시 사용 가능"
+- **EBS CSI Driver**:
+  - "Airflow, Milvus 등이 PersistentVolumeClaim을 사용하려면 필수"
+  - "Terraform Addon으로 자동 설치 → 수동 Helm 설치 불필요"
+- **재현성**: "같은 코드를 다른 리전에 apply하면 동일한 EKS 클러스터가 12분 만에 생성됩니다"
 
 ---
 
@@ -184,6 +315,79 @@ graph TB
 - **강조점**: "완벽한 도구는 없다. 조합이 답이다"
 - **예시**: "OpenSearch는 Terraform Provider로 안 되어서 curl 사용"
 - **교훈**: "도구에 집착하지 말고 목표 달성에 집중"
+
+---
+
+## ⚡ Slide 4.5: Auto-scaling 검증
+
+### 제목
+**"HPA + Cluster Autoscaler: 2단계 자동 확장 실전 검증"**
+
+### 슬라이드 내용
+
+**자동 확장 2단계 전략**
+
+```mermaid
+graph TB
+    A[부하 증가] --> B{CPU > 70%?}
+    B -->|Yes| C[HPA: Pod 확장<br/>1 → 5개]
+    C --> D{노드 리소스 부족?}
+    D -->|Yes| E[CA: 노드 추가<br/>2 → 4개]
+    D -->|No| F[기존 노드에 배치]
+    E --> G[새 노드에 Pod 배치]
+    
+    style A fill:#e0e0e0,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#ffd93d,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#95e1d3,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#ffd93d,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#4ecdc4,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#a8e6cf,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#a8e6cf,stroke:#333,stroke-width:2px,color:#000
+```
+
+**1단계: HPA (Pod 자동 확장) 검증 결과**
+
+| 단계 | CPU 사용률 | Pod 개수 | 소요 시간 | 결과 |
+|------|-----------|---------|---------|------|
+| **초기 상태** | 1% | 1 | - | 대기 중 |
+| **부하 발생** | 250% | 1 → 3 | **~2분** | ✅ 확장 성공 |
+| **부하 중단** | 1% | 3 (유지) | - | 쿨다운 대기 |
+| **5분 후** | 1% | 3 → 1 | **~6분** | ✅ 축소 성공 |
+
+**2단계: Cluster Autoscaler (노드 자동 확장) 검증 결과**
+
+| 단계 | 노드 수 | Pod 상태 | 소요 시간 | 결과 |
+|------|--------|---------|---------|------|
+| **초기 상태** | 2개 | - | - | 대기 중 |
+| **리소스 부족 발생** | 2개 | 일부 Pending | - | CA 탐지 |
+| **노드 추가** | 2 → **4개** | All Running | **~2분** | ✅ 확장 성공 |
+| **Pod 삭제 후** | 4개 (유지) | - | - | 쿨다운 대기 |
+| **10분 후** | 4 → 2 | - | **~10분** | ⏳ 축소 예정 |
+
+**핵심 수치**
+- **Metrics Server**: Terraform으로 배포 (`09-metrics-server.tf`)
+- **HPA 반응 시간**: CPU 부하 감지 → **2분 내 확장**
+- **HPA 안정화**: 5분 쿨다운 후 축소 (급격한 축소 방지)
+- **CA 반응 시간**: Pending Pod 감지 → **2분 내 노드 추가**
+- **CA 스케일링**: 2 → 4개 (예상 3개보다 1개 더 확장)
+- **리소스 효율**: 부하 없을 때 최소 리소스, 폭증 시 자동 대응
+
+### 발표자 노트 (3분)
+
+- **2단계 전략 설명**: "HPA가 먼저 Pod을 늘리고, 노드가 부족하면 CA가 노드를 추가합니다"
+- **HPA 실제 동작**: 
+  - "php-apache 테스트 앱에 부하를 주니 CPU가 250%로 상승"
+  - "HPA가 2분 만에 Pod을 1개에서 3개로 확장"
+  - "부하를 중단하고 5분 쿨다운 후 다시 1개로 축소 → 급격한 축소 방지"
+- **CA 실제 동작**:
+  - "10개 Pod(각 500m CPU)를 배포하니 노드 2개로 부족"
+  - "일부 Pod이 Pending 상태 → CA가 감지"
+  - "2분 만에 노드 2개 추가 (총 4개) → 모든 Pod Running"
+- **프로덕션 적용**:
+  - "Consumer에 HPA 적용 예정: CPU 70% 임계값, 1~5개 Pod"
+  - "Kinesis 메시지 폭증 시 자동으로 Consumer가 5배 확장"
+- **비용 효율**: "평소엔 최소 리소스, 필요할 때만 확장 → 비용 절감"
+- **교훈**: "자동 확장은 단순 설정이 아니라 실제 부하 테스트로 검증해야 합니다"
 
 ---
 
